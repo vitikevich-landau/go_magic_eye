@@ -1,5 +1,7 @@
 # 👁 go_magic_eye (Око мага) — визуальный инспектор объектов Go
 
+[![ci](https://github.com/vitikevich-landau/go_magic_eye/actions/workflows/ci.yml/badge.svg)](https://github.com/vitikevich-landau/go_magic_eye/actions/workflows/ci.yml)
+
 Подключил один пакет — и смотришь внутрь значения. Паспорт типа, схема памяти
 (поля с offset'ами, padding-дыры с причинами), заголовки `string`/`slice`/`map`,
 анатомия interface-значений — **itab, «vtable» Go** — с живыми адресами методов,
@@ -118,6 +120,15 @@ Ctrl-C и SIGTERM.
 Организация — идиоматичная для Go: публичный пакет в корне модуля, вся
 механика — в `internal/` (наружу не экспортируется), примеры — отдельные
 `main`-пакеты, тесты — рядом с кодом.
+
+Подробная документация — в `docs/`:
+
+- [docs/architecture.md](docs/architecture.md) — карта пакетов, потоки
+  Inspect и странствия (схемы), терминальный слой, как читается itab,
+  соответствие C++-оригиналу, как расширять;
+- [docs/data_model.md](docs/data_model.md) — все объекты системы и структуры
+  данных: `Model`/`Region`/`Iface`/`Satellite`, `Node`/`Session`, `App`,
+  жизненный цикл узла, сквозные инварианты.
 
 ```
 go_magic_eye/
