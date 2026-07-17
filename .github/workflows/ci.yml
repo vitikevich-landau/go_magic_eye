@@ -1,0 +1,44 @@
+# CI: сборка, vet и тесты на всех трёх полноценных платформах Ока.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./...
+      # странствие в script-режиме — дымовой прогон без терминала
+      - name: explore smoke (script mode)
+        env:
+          EYE_SCRIPT: "enter down down enter tab pgdn q"
+          EYE_WIDTH: "100"
+          EYE_HEIGHT: "24"
+          EYE_COLOR: "0"
+        run: go run ./examples/11_explorer
+        shell: bash
+
+  cross-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      # прочие ОС обязаны собираться (и честно деградировать)
+      - run: GOOS=freebsd go build ./...
+      - run: GOOS=windows GOARCH=386 go build ./...
+      - run: GOOS=darwin GOARCH=arm64 go build ./...

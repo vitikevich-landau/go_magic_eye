@@ -1,0 +1,274 @@
+package tui
+
+import (
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/vitikevich-landau/go_magic_eye/internal/nav"
+	"github.com/vitikevich-landau/go_magic_eye/internal/render"
+	"github.com/vitikevich-landau/go_magic_eye/internal/text"
+)
+
+// Кадр странствия:
+//
+//	строка 0      — картуш: галерея корней [1] [2] …
+//	строки 1..H-2 — дерево │ детали («Гримуар»)
+//	строка H-1    — гид по клавишам / строка поиска / статус
+func (a *App) zoneH() int { return a.H - 2 }
+
+func (a *App) treeW() int {
+	w := a.W * 2 / 5
+	if w < 28 {
+		w = 28
+	}
+	if w > a.W-30 {
+		w = a.W / 2
+	}
+	return w
+}
+
+// Frame — построить кадр: ровно H строк ширины W.
+func (a *App) Frame() []string {
+	out := make([]string, 0, a.H)
+	out = append(out, a.titleBar())
+	tw := a.treeW()
+	dw := a.W - tw - 1
+	tree := a.treeLines(tw)
+	det := a.detailLines(dw)
+	for i := 0; i < a.zoneH(); i++ {
+		l := &text.Line{}
+		if i < len(tree) {
+			l.Add("", tree[i])
+		}
+		l.PadTo(tw)
+		l.Add(text.CFrame, text.Rune("│", "|"))
+		if i < len(det) {
+			l.Add("", det[i])
+		}
+		l.PadTo(a.W)
+		out = append(out, l.String())
+	}
+	out = append(out, a.statusBar())
+	return out
+}
+
+func (a *App) titleBar() string {
+	l := &text.Line{}
+	l.Add(text.CTitle, text.Rune(" ◉ странствие Ока ", " (*) странствие Ока "))
+	cur := a.S.Current()
+	for i, r := range a.S.Roots {
+		style := text.CNote
+		if root(cur) == r {
+			style = text.CTitle
+		}
+		l.Addf(style, " [%d]%s", i+1, r.Label)
+	}
+	if a.panel != render.PanelAll {
+		l.Add(text.CItab, "  · панель: "+panelName(a.panel))
+	}
+	s := l.String()
+	if text.VisWidth(s) > a.W {
+		s = text.ClipVis(s, a.W)
+	}
+	return s
+}
+
+func root(n *nav.Node) *nav.Node {
+	for n != nil && n.Parent != nil {
+		n = n.Parent
+	}
+	return n
+}
+
+func panelName(p render.Panel) string {
+	switch p {
+	case render.PanelMem:
+		return "память (m)"
+	case render.PanelPass:
+		return "паспорт (p)"
+	case render.PanelIface:
+		return "интерфейсы (v)"
+	case render.PanelHex:
+		return "hex (x)"
+	}
+	return "всё"
+}
+
+// ── дерево ──────────────────────────────────────────────────────────────────
+
+func (a *App) treeLines(w int) []string {
+	vis := a.S.Visible()
+	h := a.zoneH()
+	// прокрутка: курсор всегда в окне
+	if a.S.Cursor < a.treeTop {
+		a.treeTop = a.S.Cursor
+	}
+	if a.S.Cursor >= a.treeTop+h {
+		a.treeTop = a.S.Cursor - h + 1
+	}
+	if a.treeTop > len(vis)-1 {
+		a.treeTop = maxI(0, len(vis)-1)
+	}
+	var out []string
+	for i := a.treeTop; i < len(vis) && len(out) < h; i++ {
+		out = append(out, a.treeLine(vis[i], i == a.S.Cursor, w))
+	}
+	return out
+}
+
+func (a *App) treeLine(n *nav.Node, cursor bool, w int) string {
+	l := &text.Line{}
+	l.Sp(1 + n.Depth*2)
+	exp, expStyle := expander(n)
+	l.Add(expStyle, exp+" ")
+	labStyle := text.CName
+	if n.Parent == nil {
+		labStyle = text.CTitle
+	}
+	l.Add(labStyle, n.Label)
+	if n.Sub != "" {
+		l.Add(text.CFrame, " — ").Add(text.CNote, n.Sub)
+	}
+	s := l.String()
+	if text.VisWidth(s) > w {
+		s = text.ClipVis(s, w)
+	}
+	if cursor {
+		pad := maxI(0, w-text.VisWidth(s))
+		marker := text.CSel
+		if a.focus != 0 {
+			marker = text.CDim + text.CSel
+		}
+		if text.Color {
+			return marker + stripANSI(s) + strings.Repeat(" ", pad) + text.CReset
+		}
+		return text.Rune("▶", ">") + s[minI(len(s), 1):]
+	}
+	return s
+}
+
+func expander(n *nav.Node) (string, string) {
+	switch {
+	case n.Cycle != nil:
+		return text.Rune("⟲", "@"), text.CItab
+	case n.Refusal != "":
+		return text.Rune("⛔", "x"), text.CWarn
+	case n.Expanded:
+		return text.Rune("▾", "-"), text.CFrame
+	case n.HasKids():
+		return text.Rune("▸", "+"), text.CFrame
+	}
+	return text.Rune("·", "."), text.CFrame
+}
+
+// ── детали («Гримуар») ──────────────────────────────────────────────────────
+
+func (a *App) detailLines(w int) []string {
+	if a.help {
+		return helpLines()
+	}
+	n := a.S.Current()
+	if n == nil {
+		return nil
+	}
+	if a.detNode != n || a.detPanel != a.panel || a.detFull != a.full || a.detW != w {
+		opts := render.Options{Width: w - 2, Full: a.full}
+		a.detLines = render.RenderPanel(n.Detail(), opts, a.panel)
+		a.detNode, a.detPanel, a.detFull, a.detW = n, a.panel, a.full, w
+	}
+	h := a.zoneH()
+	if a.detTop > len(a.detLines)-h {
+		a.detTop = maxI(0, len(a.detLines)-h)
+	}
+	var out []string
+	for i := a.detTop; i < len(a.detLines) && len(out) < h; i++ {
+		s := " " + a.detLines[i]
+		if text.VisWidth(s) > w {
+			s = text.ClipVis(s, w)
+		}
+		out = append(out, s)
+	}
+	if len(a.detLines) > h {
+		pos := fmt.Sprintf(" %d/%d ", a.detTop+1, len(a.detLines))
+		out[0] = out[0] + text.Paint(text.CNote, pos)
+	}
+	return out
+}
+
+// ── нижняя строка ───────────────────────────────────────────────────────────
+
+func (a *App) statusBar() string {
+	l := &text.Line{}
+	switch {
+	case a.searching:
+		l.Add(text.CTitle, " / ").Add(text.CVal, string(a.query))
+		l.Add(text.CNote, "▁  (Enter — искать, Esc — отмена)")
+	case a.status != "":
+		l.Add(text.CVal, " "+a.status)
+		l.Add(text.CNote, "   · ? помощь · q выход")
+		a.status = "" // однократное сообщение
+	default:
+		focus := "дерево"
+		if a.focus == 1 {
+			focus = "детали"
+		}
+		l.Add(text.CNote, " ↑↓ ходить · Enter/→ раскрыть/перейти · ← свернуть · b назад · Tab фокус("+
+			focus+") · m p v x панель · f развернуть · / поиск · s снимок · ? помощь · q выход")
+	}
+	s := l.String()
+	if text.VisWidth(s) > a.W {
+		s = text.ClipVis(s, a.W)
+	}
+	return s
+}
+
+func helpLines() []string {
+	raw := []string{
+		"╔═ свиток помощи ═╗",
+		"",
+		"  ↑↓ (k/j)      курсор по дереву",
+		"  →/Enter (l)   раскрыть узел · перейти по указателю",
+		"  ← (h)         свернуть · подняться к родителю",
+		"  g / b, ⌫      перейти по указателю / назад по истории",
+		"  Tab           фокус: дерево ↔ детали (PgUp/PgDn листают)",
+		"  m p v x       панель: память / паспорт / интерфейсы / hex",
+		"  f · e · c     развернуть регионы · раскрыть ветку · свернуть всё",
+		"  1..9          прыжок к N-му корню галереи",
+		"  /, n, N       поиск по раскрытым узлам, дальше/назад",
+		"  s             снимок экрана в файл (чистый текст)",
+		"  ?/F1 · q/Esc  помощь · выход",
+		"",
+		"  Переходы типизированные. Честные отказы: nil, unsafe.Pointer",
+		"  (тип стёрт), func (код, не данные). Узел-цикл помечен ⟲.",
+		"  Объекты галереи живут, пока идёт Run() — Око смотрит на",
+		"  живую память и копий не делает (кроме значений map).",
+	}
+	out := make([]string, len(raw))
+	for i, s := range raw {
+		out[i] = text.Paint(text.CNote, s)
+	}
+	return out
+}
+
+// ── вывод ───────────────────────────────────────────────────────────────────
+
+func (a *App) draw(w io.Writer) {
+	var b strings.Builder
+	b.WriteString("\x1b[H")
+	for i, l := range a.Frame() {
+		if i > 0 {
+			b.WriteString("\r\n")
+		}
+		b.WriteString(l)
+		b.WriteString("\x1b[K")
+	}
+	io.WriteString(w, b.String())
+}
+
+func minI(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
