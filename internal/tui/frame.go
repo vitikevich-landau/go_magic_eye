@@ -202,7 +202,9 @@ func expander(n *nav.Node) (string, string) {
 	case n.Cycle != nil:
 		return text.Rune("⟲", "@"), text.CItab
 	case n.Refusal != "":
-		return text.Rune("⛔", "x"), text.CWarn
+		// не «⛔»: у эмодзи-глифов двойная ширина в большинстве шрифтов —
+		// они сдвигают колонки дерева и снимков
+		return text.Rune("✗", "x"), text.CWarn
 	case n.Expanded:
 		return text.Rune("▾", "-"), text.CFrame
 	case n.HasKids():
@@ -296,7 +298,7 @@ func helpLines() []string {
 		"  f · e · c     развернуть регионы · раскрыть ветку · свернуть всё",
 		"  1..9          прыжок к N-му корню галереи",
 		"  /, n, N       поиск по раскрытым узлам, дальше/назад",
-		"  s             снимок экрана в файл (чистый текст)",
+		"  s             снимок в файл: дерево + детали узла (чистый текст)",
 		"  ?/F1 · q/Esc  помощь · выход",
 		"",
 		"  Переходы типизированные. Честные отказы: nil, unsafe.Pointer",

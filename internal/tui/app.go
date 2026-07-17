@@ -11,6 +11,7 @@ import (
 	"github.com/vitikevich-landau/go_magic_eye/internal/nav"
 	"github.com/vitikevich-landau/go_magic_eye/internal/render"
 	"github.com/vitikevich-landau/go_magic_eye/internal/term"
+	"github.com/vitikevich-landau/go_magic_eye/internal/text"
 )
 
 // App — странствие: дерево слева, «Гримуар» (детали) справа, гид внизу.
@@ -281,7 +282,7 @@ func (a *App) enter() {
 		return
 	}
 	if n.Refusal != "" {
-		a.status = "⛔ " + n.Refusal
+		a.status = "✗ " + n.Refusal
 		return
 	}
 	if n.Cycle != nil {
@@ -333,17 +334,61 @@ func (a *App) searchNext(back bool) {
 	}
 }
 
-// snapshot — кадр в файл чистым текстом (без ANSI).
+// snapWidth — ширина деталей в снимке: фиксированная, чтобы файл читался
+// ровно в любом редакторе независимо от ширины терминала.
+const snapWidth = 100
+
+// snapshot — снимок странствия в файл: НЕ дамп экрана, а документ.
+// Экранный кадр добит пробелами до ширины терминала и склеен из двух
+// колонок — в редакторе такие строки заворачиваются и всё разъезжается.
+// Вместо этого пишем: шапку, полное дерево (без обрезки под зону) и полные
+// детали текущего узла; каждая строка без ANSI и без хвостовых пробелов.
 func (a *App) snapshot() {
-	a.snapN++
-	name := fmt.Sprintf("eye_snap_%03d.txt", a.snapN)
-	if a.snapDir != "" {
-		name = filepath.Join(a.snapDir, name)
-	}
 	var b strings.Builder
-	for _, l := range a.Frame() {
-		b.WriteString(stripANSI(l))
-		b.WriteString("\n")
+	line := func(s string) {
+		b.WriteString(strings.TrimRight(stripANSI(s), " "))
+		b.WriteByte('\n')
+	}
+	rule := text.Rune("─", "-")
+	section := func(title string) {
+		line("")
+		line(rule + rule + " " + title + " " +
+			strings.Repeat(rule, maxI(4, snapWidth-6-text.VisWidth(title))))
+	}
+
+	line(text.Rune("◉ ", "(*) ") + "странствие Ока — снимок")
+	section("дерево")
+	for i, n := range a.S.Visible() {
+		cursor := "  "
+		if i == a.S.Cursor {
+			cursor = text.Rune("▶ ", "> ")
+		}
+		exp, _ := expander(n)
+		s := cursor + strings.Repeat(" ", n.Depth*2) + exp + " " + n.Label
+		if n.Sub != "" {
+			s += " — " + n.Sub
+		}
+		line(s)
+	}
+	if cur := a.S.Current(); cur != nil {
+		section("детали: " + cur.Label + " · панель: " + panelName(a.panel))
+		det := render.RenderPanel(cur.Detail(), render.Options{Width: snapWidth, Full: a.full}, a.panel)
+		for _, l := range det {
+			line(l)
+		}
+	}
+
+	// первое свободное имя — не затираем снимки прошлых сессий
+	var name string
+	for {
+		a.snapN++
+		name = fmt.Sprintf("eye_snap_%03d.txt", a.snapN)
+		if a.snapDir != "" {
+			name = filepath.Join(a.snapDir, name)
+		}
+		if _, err := os.Stat(name); os.IsNotExist(err) {
+			break
+		}
 	}
 	if err := os.WriteFile(name, []byte(b.String()), 0o644); err != nil {
 		a.status = "снимок не записался: " + err.Error()

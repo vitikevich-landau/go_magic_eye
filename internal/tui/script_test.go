@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -98,6 +100,45 @@ func TestScriptQuit(t *testing.T) {
 	out := runScript(t, "q")
 	if !strings.Contains(out, "выход по «q»") {
 		t.Fatal("q не вышел")
+	}
+}
+
+// Снимок — документ, а не дамп экрана: без ANSI, без хвостовых пробелов,
+// не шире snapWidth, с деревом и деталями.
+func TestSnapshotFileFormat(t *testing.T) {
+	dir := t.TempDir()
+	app := NewApp(session(t), dir)
+	app.W, app.H = 100, 24
+	for _, tok := range []string{"enter", "down", "s"} {
+		k, _ := ParseScriptKey(tok)
+		app.Handle(k)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "eye_snap_001.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(data)
+	for _, want := range []string{"странствие Ока", "── дерево", "── детали: Name", "странник", "Bag"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("в снимке нет %q:\n%s", want, out)
+		}
+	}
+	for i, l := range strings.Split(out, "\n") {
+		if strings.ContainsRune(l, 0x1b) {
+			t.Fatalf("ANSI в снимке (строка %d): %q", i, l)
+		}
+		if strings.TrimRight(l, " ") != l {
+			t.Fatalf("хвостовые пробелы (строка %d): %q", i, l)
+		}
+		if w := text.VisWidth(l); w > snapWidth {
+			t.Fatalf("строка %d шире %d (%d): %q", i, snapWidth, w, l)
+		}
+	}
+	// второй снимок не затирает первый
+	k, _ := ParseScriptKey("s")
+	app.Handle(k)
+	if _, err := os.Stat(filepath.Join(dir, "eye_snap_002.txt")); err != nil {
+		t.Fatal("второй снимок должен получить следующий номер:", err)
 	}
 }
 
