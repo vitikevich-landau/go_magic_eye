@@ -33,6 +33,9 @@ type App struct {
 	snapN   int
 	snapDir string
 
+	prev  []string // последний нарисованный кадр (для построчного диффа)
+	dirty bool     // кадр требует перерисовки
+
 	detNode  *nav.Node // для какого узла собраны детали
 	detPanel render.Panel
 	detFull  bool
@@ -73,10 +76,14 @@ func (a *App) Run() error {
 
 	term.EnterAlt(os.Stdout)
 	a.resize()
+	a.dirty = true
 	dec := &Decoder{}
 	buf := make([]byte, 128)
 	for {
-		a.draw(os.Stdout)
+		if a.dirty {
+			a.draw(os.Stdout)
+			a.dirty = false
+		}
 		n, err := term.ReadInput(buf, 100)
 		if err != nil {
 			return nil // stdin закрыт — тихо выходим, терминал восстановит defer
@@ -89,6 +96,7 @@ func (a *App) Run() error {
 			a.resize()         // тишина — удобный момент проверить размер окна
 		}
 		for _, k := range keys {
+			a.dirty = true
 			if a.Handle(k) {
 				return nil
 			}
@@ -101,6 +109,8 @@ func (a *App) resize() {
 		if w != a.W || h != a.H {
 			a.W, a.H = w, h
 			a.detTop = 0
+			a.prev = nil // размер сменился — полный перерис с очисткой
+			a.dirty = true
 		}
 		return
 	}
@@ -114,6 +124,7 @@ func (a *App) Handle(k Key) bool {
 	if a.searching {
 		return a.handleSearch(k)
 	}
+	a.status = "" // сообщение прошлой клавиши погасло; обработчик поставит новое
 	if a.help {
 		// пока открыт свиток помощи, клавиши только закрывают его
 		if k.Type == KEsc || k.Type == KF1 || k.Type == KCtrlC ||

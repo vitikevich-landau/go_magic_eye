@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/vitikevich-landau/go_magic_eye/internal/nav"
+	"github.com/vitikevich-landau/go_magic_eye/internal/text"
 )
 
 // Снапшот-тесты странствия: как EYE_SCRIPT, но без подпроцесса — кадры
@@ -97,5 +98,28 @@ func TestScriptQuit(t *testing.T) {
 	out := runScript(t, "q")
 	if !strings.Contains(out, "выход по «q»") {
 		t.Fatal("q не вышел")
+	}
+}
+
+// Ни одна строка кадра не смеет быть шире экрана: перелив вызывает
+// автоперенос, прокрутку и мерцание всего терминала (регресс-тест).
+func TestFrameLinesNeverOverflowWidth(t *testing.T) {
+	app := NewApp(session(t), t.TempDir())
+	app.W, app.H = 100, 24
+	script := []string{"enter", "down", "enter", "down", "down", "enter",
+		"tab", "pgdn", "x", "m", "?"}
+	check := func(when string) {
+		for i, l := range app.Frame() {
+			if w := text.VisWidth(l); w > app.W {
+				t.Fatalf("строка %d шире экрана (%d > %d) после %q:\n%q",
+					i, w, app.W, when, l)
+			}
+		}
+	}
+	check("старт")
+	for _, tok := range script {
+		k, _ := ParseScriptKey(tok)
+		app.Handle(k)
+		check(tok)
 	}
 }

@@ -44,7 +44,13 @@ func (a *App) Frame() []string {
 		l.PadTo(tw)
 		l.Add(text.CFrame, text.Rune("│", "|"))
 		if i < len(det) {
-			l.Add("", det[i])
+			d := det[i]
+			// зона деталей обрезается ЗДЕСЬ, на сборке кадра: строка шире
+			// экрана = автоперенос = прокрутка = мерцание всего терминала
+			if text.VisWidth(d) > dw {
+				d = text.ClipVis(d, dw)
+			}
+			l.Add("", d)
 		}
 		l.PadTo(a.W)
 		out = append(out, l.String())
@@ -189,9 +195,16 @@ func (a *App) detailLines(w int) []string {
 		}
 		out = append(out, s)
 	}
-	if len(a.detLines) > h {
+	// индикатор прокрутки — СТРОГО внутри ширины зоны: строка длиннее
+	// терминала вызывает автоперенос, прокрутку и мерцание всего экрана
+	if len(a.detLines) > h && len(out) > 0 {
 		pos := fmt.Sprintf(" %d/%d ", a.detTop+1, len(a.detLines))
-		out[0] = out[0] + text.Paint(text.CNote, pos)
+		keep := w - text.VisWidth(pos)
+		first := out[0]
+		if text.VisWidth(first) > keep {
+			first = text.ClipVis(first, keep)
+		}
+		out[0] = text.PadVis(first, keep) + text.Paint(text.CNote, pos)
 	}
 	return out
 }
@@ -207,7 +220,6 @@ func (a *App) statusBar() string {
 	case a.status != "":
 		l.Add(text.CVal, " "+a.status)
 		l.Add(text.CNote, "   · ? помощь · q выход")
-		a.status = "" // однократное сообщение
 	default:
 		focus := "дерево"
 		if a.focus == 1 {
@@ -253,16 +265,27 @@ func helpLines() []string {
 
 // ── вывод ───────────────────────────────────────────────────────────────────
 
+// draw — построчный дифф: переписываются только изменившиеся строки, кадр
+// обёрнут в «синхронизированный вывод» (DECSET 2026 — терминалы, которые
+// его умеют, показывают кадр атомарно; остальные молча игнорируют).
 func (a *App) draw(w io.Writer) {
+	frame := a.Frame()
 	var b strings.Builder
-	b.WriteString("\x1b[H")
-	for i, l := range a.Frame() {
-		if i > 0 {
-			b.WriteString("\r\n")
+	b.WriteString("\x1b[?2026h")
+	if len(a.prev) != len(frame) {
+		b.WriteString("\x1b[2J")
+		a.prev = make([]string, len(frame))
+	}
+	for i, l := range frame {
+		if a.prev[i] == l {
+			continue
 		}
+		fmt.Fprintf(&b, "\x1b[%d;1H", i+1)
 		b.WriteString(l)
 		b.WriteString("\x1b[K")
+		a.prev[i] = l
 	}
+	b.WriteString("\x1b[?2026l")
 	io.WriteString(w, b.String())
 }
 
