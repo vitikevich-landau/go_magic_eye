@@ -43,7 +43,7 @@ func runScript(t *testing.T, tokens string) string {
 
 func TestScriptStartFrame(t *testing.T) {
 	out := runScript(t, "")
-	for _, want := range []string{"странствие Ока", "странник", "память", "Tab фокус"} {
+	for _, want := range []string{"странствие Ока", "странник", "память", "Tab ", "▌ ДЕРЕВО ▐"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("в стартовом кадре нет %q\n%s", want, out)
 		}
@@ -98,6 +98,50 @@ func TestScriptQuit(t *testing.T) {
 	out := runScript(t, "q")
 	if !strings.Contains(out, "выход по «q»") {
 		t.Fatal("q не вышел")
+	}
+}
+
+// Фокус: Tab переключает зоны с явной плашкой-ярлыком; ← из деталей
+// возвращает в дерево, НЕ сворачивая выбранный узел.
+func TestFocusTabAndLeft(t *testing.T) {
+	app := NewApp(session(t), t.TempDir())
+	app.W, app.H = 100, 24
+
+	frame := strings.Join(app.Frame(), "\n")
+	if !strings.Contains(frame, "▌ ДЕРЕВО ▐") || !strings.Contains(frame, "── детали") {
+		t.Fatalf("стартовые ярлыки зон не те:\n%s", frame)
+	}
+
+	enter, _ := ParseScriptKey("enter")
+	tab, _ := ParseScriptKey("tab")
+	left, _ := ParseScriptKey("left")
+
+	app.Handle(enter) // раскрыть корень
+	root := app.S.Roots[0]
+	if !root.Expanded {
+		t.Fatal("корень не раскрылся")
+	}
+	app.Handle(tab)
+	frame = strings.Join(app.Frame(), "\n")
+	if !strings.Contains(frame, "▌ ДЕТАЛИ ▐") || !strings.Contains(frame, "── дерево") {
+		t.Fatalf("после Tab активной должна стать плашка ДЕТАЛИ:\n%s", frame)
+	}
+	if !strings.Contains(frame, "[детали]") {
+		t.Fatal("гид внизу не показывает фокус [детали]")
+	}
+
+	app.Handle(left) // из деталей — назад в дерево, узел НЕ трогаем
+	if !root.Expanded {
+		t.Fatal("← из зоны деталей свернул узел — а должен только вернуть фокус")
+	}
+	frame = strings.Join(app.Frame(), "\n")
+	if !strings.Contains(frame, "▌ ДЕРЕВО ▐") {
+		t.Fatal("← из деталей не вернул фокус в дерево")
+	}
+
+	app.Handle(left) // а теперь фокус в дереве — узел сворачивается
+	if root.Expanded {
+		t.Fatal("← в дереве должен сворачивать узел")
 	}
 }
 

@@ -13,9 +13,10 @@ import (
 // Кадр странствия:
 //
 //	строка 0      — картуш: галерея корней [1] [2] …
-//	строки 1..H-2 — дерево │ детали («Гримуар»)
+//	строка 1      — ярлыки зон: ▌ ДЕРЕВО ▐ │ ── детали (ответ на «где я» после Tab)
+//	строки 2..H-2 — дерево │ детали («Гримуар»)
 //	строка H-1    — гид по клавишам / строка поиска / статус
-func (a *App) zoneH() int { return a.H - 2 }
+func (a *App) zoneH() int { return a.H - 3 }
 
 func (a *App) treeW() int {
 	w := a.W * 2 / 5
@@ -34,6 +35,13 @@ func (a *App) Frame() []string {
 	out = append(out, a.titleBar())
 	tw := a.treeW()
 	dw := a.W - tw - 1
+	out = append(out, a.zoneTabs(tw, dw))
+	// разделитель подсвечен золотом, когда фокус в деталях — глаз сразу
+	// видит, какая зона ловит ↑↓/PgUp (приём C++-предка)
+	spine := text.CFrame
+	if a.focus == 1 {
+		spine = text.CFocus
+	}
 	tree := a.treeLines(tw)
 	det := a.detailLines(dw)
 	for i := 0; i < a.zoneH(); i++ {
@@ -42,7 +50,7 @@ func (a *App) Frame() []string {
 			l.Add("", tree[i])
 		}
 		l.PadTo(tw)
-		l.Add(text.CFrame, text.Rune("│", "|"))
+		l.Add(spine, text.Rune("│", "|"))
 		if i < len(det) {
 			d := det[i]
 			// зона деталей обрезается ЗДЕСЬ, на сборке кадра: строка шире
@@ -78,6 +86,41 @@ func (a *App) titleBar() string {
 		s = text.ClipVis(s, a.W)
 	}
 	return s
+}
+
+// zoneTabs — полоса ярлыков зон: активная — громкой плашкой-инверсией,
+// пассивная — тихой строчной с линейкой. Главный ответ на «где я» после Tab.
+func (a *App) zoneTabs(tw, dw int) string {
+	l := &text.Line{}
+	l.Add("", zoneTab("ДЕРЕВО", "дерево", a.focus == 0, tw))
+	sep := text.CFrame
+	if a.focus == 1 {
+		sep = text.CFocus
+	}
+	l.Add(sep, text.Rune("│", "|"))
+	l.Add("", zoneTab("ДЕТАЛИ", "детали", a.focus == 1, dw))
+	return l.String()
+}
+
+func zoneTab(loud, quiet string, active bool, width int) string {
+	rule := text.Rune("─", "-")
+	var chip, style string
+	if active {
+		chip = text.Rune("▌ ", "[ ") + loud + text.Rune(" ▐", " ]")
+		style = text.CSel
+	} else {
+		chip = rule + rule + " " + quiet + " "
+		style = text.CNote
+	}
+	if text.VisWidth(chip) > width {
+		chip = text.ClipVis(chip, width)
+	}
+	l := &text.Line{}
+	l.Add(style, chip)
+	if fill := width - l.W(); fill > 0 {
+		l.Add(text.CFrame, strings.Repeat(rule, fill))
+	}
+	return l.String()
 }
 
 func root(n *nav.Node) *nav.Node {
@@ -221,12 +264,16 @@ func (a *App) statusBar() string {
 		l.Add(text.CVal, " "+a.status)
 		l.Add(text.CNote, "   · ? помощь · q выход")
 	default:
-		focus := "дерево"
+		focus := "[дерево]"
+		hintLeft := "← свернуть"
 		if a.focus == 1 {
-			focus = "детали"
+			focus = "[детали]"
+			hintLeft = "← в дерево"
 		}
-		l.Add(text.CNote, " ↑↓ ходить · Enter/→ раскрыть/перейти · ← свернуть · b назад · Tab фокус("+
-			focus+") · m p v x панель · f развернуть · / поиск · s снимок · ? помощь · q выход")
+		l.Add(text.CNote, " ↑↓ ходить · Enter/→ раскрыть/перейти · "+hintLeft+
+			" · b назад · Tab ")
+		l.Add(text.CFocus, focus)
+		l.Add(text.CNote, " · m p v x панель · f развернуть · / поиск · s снимок · ? помощь · q выход")
 	}
 	s := l.String()
 	if text.VisWidth(s) > a.W {
@@ -241,9 +288,10 @@ func helpLines() []string {
 		"",
 		"  ↑↓ (k/j)      курсор по дереву",
 		"  →/Enter (l)   раскрыть узел · перейти по указателю",
-		"  ← (h)         свернуть · подняться к родителю",
+		"  ← (h)         свернуть · подняться; из деталей — фокус в дерево",
 		"  g / b, ⌫      перейти по указателю / назад по истории",
-		"  Tab           фокус: дерево ↔ детали (PgUp/PgDn листают)",
+		"  Tab           фокус: дерево ↔ детали (ярлык-плашка показывает где ты;",
+		"                ↑↓/PgUp/PgDn листают фокусную зону)",
 		"  m p v x       панель: память / паспорт / интерфейсы / hex",
 		"  f · e · c     развернуть регионы · раскрыть ветку · свернуть всё",
 		"  1..9          прыжок к N-му корню галереи",
