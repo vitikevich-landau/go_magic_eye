@@ -54,7 +54,9 @@ func WithWriter(w io.Writer) Option {
 	}
 }
 
-// WithLabel — подпись в заголовке (эквивалент label у Inspect).
+// WithLabel — подпись в заголовке (эквивалент label у Inspect). Действует на
+// Finspect и FinspectType; галерея её игнорирует — там у каждого корня своя
+// подпись, вторым аргументом Add/AddType.
 func WithLabel(label string) Option { return func(c *config) { c.label = label } }
 
 // WithWidth — считать экран шириной cols колонок (как EYE_WIDTH).
