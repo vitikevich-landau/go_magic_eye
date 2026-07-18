@@ -20,7 +20,7 @@ func (u *Unit) Walk() string { return "топ-топ" }
 
 // Knight — «наследник»: встраивает Unit значением.
 type Knight struct {
-	Unit          // под-объект по offset 0; Walk продвинут наружу
+	Unit   // под-объект по offset 0; Walk продвинут наружу
 	armor  int16
 	banner string
 }

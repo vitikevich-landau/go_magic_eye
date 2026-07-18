@@ -14,6 +14,13 @@ import (
 
 const bytesPerRow = 8
 
+// memLayout — раскладка колонок карты памяти. Полный вид:
+//
+//	+0x0018  ████████  47 72 69 66 66 69 6e 00  Griffin·   ← banner : string = …
+//	offset   кирпичи   hex (по 3 колонки на байт) ascii       выноска
+//
+// На узких экранах (панель деталей TUI) колонки отваливаются по одной:
+// сначала ascii, потом кирпичи — hex и выноска не сдаются никогда.
 type memLayout struct {
 	bricks bool // колонка кирпичей
 	ascii  bool // ascii-колонка
@@ -23,8 +30,9 @@ type memLayout struct {
 
 func layoutFor(inner int) memLayout {
 	l := memLayout{bricks: true, ascii: true}
+	// 7 (offset) + 2 + 8 (кирпичи) + 2 + 24 (hex) + 2 + 8 (ascii) + 2
 	l.left = 7 + 2 + 8 + 2 + 3*bytesPerRow + 2 + bytesPerRow + 2
-	if inner-l.left < 24 {
+	if inner-l.left < 24 { // выноске нужно хотя бы ~24 колонки
 		l.ascii = false
 		l.left -= bytesPerRow + 2
 	}
@@ -77,7 +85,7 @@ func regionBlock(m *model.Model, r *model.Region, lay memLayout, o Options) []st
 	call := callout(r, lay.callW)
 	if r.Size == 0 {
 		l := &text.Line{}
-		l.Sp(7 + 2).Add(text.CNote, "∅ ")
+		l.Sp(7+2).Add(text.CNote, "∅ ")
 		return append([]string{}, zip(l.String(), call, lay)...)
 	}
 
@@ -90,13 +98,16 @@ func regionBlock(m *model.Model, r *model.Region, lay memLayout, o Options) []st
 	// свёртка длинных регионов
 	if !o.Full && len(rows) > 4 {
 		hidden := (len(rows) - 3) * bytesPerRow
-		fold := (&text.Line{}).Sp(9).Addf(text.CNote, "⋯ ещё ~%d Б (f/EYE_FULL=1 развернёт) ⋯", hidden).String()
+		fold := (&text.Line{}).Sp(9).Addf(text.CNote, "%s ещё ~%d Б (f/EYE_FULL=1 развернёт) %s", text.Rune("⋯", "..."), hidden, text.Rune("⋯", "...")).String()
 		rows = append(append(rows[:2:2], fold), rows[len(rows)-1])
 	}
 	return zipAll(rows, call, lay)
 }
 
-// byteRow — одна 8-байтовая строка региона: только его байты, чужие колонки пусты.
+// byteRow — одна 8-байтовая строка региона: только его байты, чужие колонки
+// пусты. Именно пустоты и учат: байт со смещением N всегда стоит в колонке
+// N%8, поэтому поле, начинающееся с offset 4, «висит» посреди строки — и
+// глаз сразу видит, как выравнивание раскидало поля по словам.
 func byteRow(m *model.Model, r *model.Region, row int, lay memLayout) string {
 	base := uintptr(row * bytesPerRow)
 	l := &text.Line{}
@@ -163,10 +174,10 @@ func callout(r *model.Region, callW int) []string {
 	var out []string
 	if r.Kind == model.RPadding {
 		l := &text.Line{}
-		l.Add(text.CPad, fmt.Sprintf("⋯ дыра %d Б", r.Size))
+		l.Add(text.CPad, fmt.Sprintf("%s дыра %d Б", text.Rune("⋯", "..."), r.Size))
 		out = append(out, l.String())
 		if r.Note != "" {
-			out = append(out, wrapAt(2, "↳ ", r.Note, callW, text.CPad)...)
+			out = append(out, wrapAt(2, text.Rune("↳ ", "-> "), r.Note, callW, text.CPad)...)
 		}
 		return out
 	}
@@ -179,16 +190,21 @@ func callout(r *model.Region, callW int) []string {
 	}
 	out = append(out, l.String())
 	if r.Note != "" {
-		out = append(out, wrapAt(2, "↳ ", r.Note, callW, text.CNote)...)
+		out = append(out, wrapAt(2, text.Rune("↳ ", "-> "), r.Note, callW, text.CNote)...)
 	}
 	if r.From != "" {
-		out = append(out, (&text.Line{}).Add(text.CNote, "  ⌂ из "+r.From).String())
+		out = append(out, (&text.Line{}).Add(text.CNote, "  "+text.Rune("⌂ из ", "из ")+r.From).String())
 	}
 	return out
 }
 
-// zip склеивает левые строки байтов и правые строки выноски бок о бок.
+// zipAll склеивает левые строки (байты) и правые (выноску) бок о бок:
+// блок региона высотой max(листы байтов, строки выноски); первая строка
+// выноски получает стрелку «←», остальные выравниваются ПОД неё — отступ
+// продолжений равен ширине стрелки (в ASCII она шире: «<- »).
 func zipAll(left, right []string, lay memLayout) []string {
+	arrow := text.Rune("← ", "<- ")
+	aw := text.VisWidth(arrow)
 	n := max(len(left), len(right))
 	out := make([]string, 0, n)
 	for i := 0; i < n; i++ {
@@ -199,9 +215,9 @@ func zipAll(left, right []string, lay memLayout) []string {
 		l.PadTo(lay.left)
 		if i < len(right) {
 			if i == 0 {
-				l.Add(text.CFrame, text.Rune("← ", "<- "))
+				l.Add(text.CFrame, arrow)
 			} else {
-				l.Sp(2)
+				l.Sp(aw)
 			}
 			l.Add("", right[i])
 		}

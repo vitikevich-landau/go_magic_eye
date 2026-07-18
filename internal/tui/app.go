@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/vitikevich-landau/go_magic_eye/internal/nav"
@@ -50,17 +52,35 @@ func NewApp(s *nav.Session, snapDir string) *App {
 
 // Run — интерактивный цикл: raw-терминал, альтернативный экран,
 // восстановление при любом исходе (defer + сигналы).
+//
+// Устройство цикла: горутин-читателей НЕТ. term.ReadInput возвращается сам
+// не позже ~100 мс (termios VTIME на Unix, WaitForSingleObject на Windows),
+// поэтому один цикл успевает всё: забрать байты клавиш, по тишине дозреть
+// одинокий Esc (Flush) и заметить смену размера окна. Побочная выгода —
+// после выхода не остаётся «застрявшего» читателя, крадущего stdin у
+// программы-хозяина.
+// ErrInterrupted — странствие прервано сигналом (Ctrl-C/SIGTERM). Терминал
+// к моменту возврата уже восстановлен; решение «жить дальше или выйти» — за
+// вызывающим (eye.Gallery.Run выходит с кодом 130, как принято у Unix).
+var ErrInterrupted = errors.New("странствие прервано сигналом")
+
 func (a *App) Run() error {
 	restore, err := term.Raw()
 	if err != nil {
 		return err
 	}
-	cleanup := func() {
+	defer func() {
 		term.ExitAlt(os.Stdout)
 		restore()
-	}
-	defer cleanup()
+	}()
 
+	// Сигнал НЕ восстанавливает терминал сам — иначе горутина сигнала
+	// гонялась бы с draw() главного цикла (запись в уже восстановленный
+	// экран, двойной restore). Вместо этого она только поднимает флаг;
+	// цикл замечает его не позже чем через ~100 мс (таймаут ReadInput,
+	// а на Unix сигнал ещё и рвёт read немедленно — EINTR) и выходит
+	// обычным путём, где defer'ы отработают в одном потоке.
+	var interrupted atomic.Bool
 	sig := make(chan os.Signal, 2)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sig)
@@ -69,8 +89,7 @@ func (a *App) Run() error {
 	go func() {
 		select {
 		case <-sig:
-			cleanup()
-			os.Exit(130) // терминал уже цел — можно уходить
+			interrupted.Store(true)
 		case <-done:
 		}
 	}()
@@ -81,6 +100,9 @@ func (a *App) Run() error {
 	dec := &Decoder{}
 	buf := make([]byte, 128)
 	for {
+		if interrupted.Load() {
+			return ErrInterrupted
+		}
 		if a.dirty {
 			a.draw(os.Stdout)
 			a.dirty = false
@@ -93,7 +115,7 @@ func (a *App) Run() error {
 		if n > 0 {
 			keys = dec.Feed(buf[:n])
 		} else {
-			keys = dec.Flush() // одинокий ESC дозрел
+			keys = dec.Flush() // одинокая/оборванная ESC-последовательность дозрела
 			a.resize()         // тишина — удобный момент проверить размер окна
 		}
 		for _, k := range keys {
@@ -105,18 +127,22 @@ func (a *App) Run() error {
 	}
 }
 
+// resize перечитывает размер окна. Принимается ЛЮБОЙ размер: если рисовать
+// кадр по устаревшему большему, строки перенесутся и экран разъедется;
+// про «слишком мало» честно скажет сам Frame.
 func (a *App) resize() {
-	if w, h, ok := term.Size(); ok && w >= 40 && h >= 8 {
-		if w != a.W || h != a.H {
-			a.W, a.H = w, h
-			a.detTop = 0
-			a.prev = nil // размер сменился — полный перерис с очисткой
-			a.dirty = true
+	w, h, ok := term.Size()
+	if !ok {
+		if a.W == 0 {
+			a.W, a.H = 100, 32
 		}
 		return
 	}
-	if a.W == 0 {
-		a.W, a.H = 100, 32
+	if w != a.W || h != a.H {
+		a.W, a.H = w, h
+		a.detTop = 0
+		a.prev = nil // размер сменился — полный перерис с очисткой
+		a.dirty = true
 	}
 }
 
@@ -135,6 +161,8 @@ func (a *App) Handle(k Key) bool {
 		return false
 	}
 	switch k.Type {
+	case KIgnore:
+		return false // нераспознанная последовательность — не действие
 	case KCtrlC, KEsc:
 		return true
 	case KUp:
@@ -205,7 +233,9 @@ func (a *App) rune(r rune) bool {
 	case 'N':
 		a.searchNext(true)
 	case 's':
-		a.snapshot()
+		a.snapshot() // точная копия экрана
+	case 'S':
+		a.snapshotDoc() // развёрнутый документ: дерево + детали целиком
 	case '?':
 		a.help = !a.help
 	}
@@ -281,14 +311,26 @@ func (a *App) enter() {
 	if n == nil {
 		return
 	}
-	if n.Refusal != "" {
-		a.status = "✗ " + n.Refusal
+	if n.Cycle != nil {
+		a.status = text.Rune("⟲", "@") + " прыжок к уже показанному узлу"
+		a.S.Enter()
+		a.detTop = 0
 		return
 	}
-	if n.Cycle != nil {
-		a.status = "⟲ прыжок к уже показанному узлу"
+	// тупик? — честный отказ ГОЛОСОМ, а не молчанием (Explain знает причину
+	// и до ленивого построения детей)
+	if !n.HasKids() {
+		if msg := n.Explain(); msg != "" {
+			a.status = text.Rune("✗", "x") + " " + msg
+		}
+		return
 	}
 	a.S.Enter()
+	// дети могли построиться только что — если строитель записал отказ,
+	// показать и его
+	if n.Refusal != "" {
+		a.status = text.Rune("✗", "x") + " " + n.Refusal
+	}
 	a.detTop = 0
 }
 
@@ -334,16 +376,41 @@ func (a *App) searchNext(back bool) {
 	}
 }
 
-// snapWidth — ширина деталей в снимке: фиксированная, чтобы файл читался
-// ровно в любом редакторе независимо от ширины терминала.
+// ── снимки (s / S) ──────────────────────────────────────────────────────────
+//
+// Две ипостаси, обе — чистый текст без ANSI:
+//
+//	s — ТОЧНАЯ КОПИЯ ЭКРАНА: последний показанный кадр, строка в строку,
+//	    колонка в колонку. Единственная вольность — хвостовые пробелы
+//	    каждой строки срезаны: они невидимы на экране, но в редакторе
+//	    заворачивали бы строки и рушили вёрстку (урок C++-предка).
+//	    Ширина файла = ширина терминала в момент снимка.
+//	S — РАЗВЁРНУТЫЙ ДОКУМЕНТ: дерево целиком (без обрезки под зону) +
+//	    детали текущего узла целиком, свёрстанные в фиксированные 100
+//	    колонок — для отчётов и чтения вне терминала.
+
+// snapWidth — ширина деталей в документе-снимке (S).
 const snapWidth = 100
 
-// snapshot — снимок странствия в файл: НЕ дамп экрана, а документ.
-// Экранный кадр добит пробелами до ширины терминала и склеен из двух
-// колонок — в редакторе такие строки заворачиваются и всё разъезжается.
-// Вместо этого пишем: шапку, полное дерево (без обрезки под зону) и полные
-// детали текущего узла; каждая строка без ANSI и без хвостовых пробелов.
+// snapshot (клавиша s) — точная копия экрана.
+// Источник — a.prev: ровно те строки, что сейчас стоят на экране (их рисовал
+// draw). Кадр из Frame() строится только если prev ещё пуст (script-режим).
 func (a *App) snapshot() {
+	rows := a.prev
+	if len(rows) == 0 {
+		rows = a.Frame()
+	}
+	var b strings.Builder
+	for _, l := range rows {
+		b.WriteString(strings.TrimRight(stripANSI(l), " "))
+		b.WriteByte('\n')
+	}
+	a.writeSnap(b.String(), "снимок экрана")
+}
+
+// snapshotDoc (клавиша S) — развёрнутый документ: шапка, всё дерево с
+// маркером курсора, полные детали текущего узла.
+func (a *App) snapshotDoc() {
 	var b strings.Builder
 	line := func(s string) {
 		b.WriteString(strings.TrimRight(stripANSI(s), " "))
@@ -377,24 +444,40 @@ func (a *App) snapshot() {
 			line(l)
 		}
 	}
+	a.writeSnap(b.String(), "снимок-документ")
+}
 
-	// первое свободное имя — не затираем снимки прошлых сессий
-	var name string
-	for {
-		a.snapN++
-		name = fmt.Sprintf("eye_snap_%03d.txt", a.snapN)
+// writeSnap пишет содержимое в первое свободное eye_snap_NNN.txt.
+// Имя занимается АТОМАРНО (O_EXCL — «только создать, не усекать»): два
+// процесса в одном каталоге не затирают снимки друг друга, а проверка
+// «Stat, потом создать» страдала бы гонкой TOCTOU. Успех объявляется только
+// после Close: полный диск всплывает на сбросе буфера, не на записи.
+func (a *App) writeSnap(content, what string) {
+	for n := a.snapN + 1; n <= 999; n++ {
+		name := fmt.Sprintf("eye_snap_%03d.txt", n)
 		if a.snapDir != "" {
 			name = filepath.Join(a.snapDir, name)
 		}
-		if _, err := os.Stat(name); os.IsNotExist(err) {
-			break
+		f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err != nil {
+			if os.IsExist(err) {
+				continue // имя занято — пробуем следующий номер
+			}
+			a.status = "снимок не записался: " + err.Error()
+			return
 		}
-	}
-	if err := os.WriteFile(name, []byte(b.String()), 0o644); err != nil {
-		a.status = "снимок не записался: " + err.Error()
+		_, werr := f.WriteString(content)
+		cerr := f.Close()
+		if werr != nil || cerr != nil {
+			os.Remove(name) // не оставлять пустой огрызок
+			a.status = "снимок не записался (место на диске?)"
+			return
+		}
+		a.snapN = n
+		a.status = text.Rune("📸", "[snap]") + " " + what + ": " + name
 		return
 	}
-	a.status = "📸 снимок: " + name
+	a.status = "все 999 имён снимков заняты — почисти каталог"
 }
 
 func stripANSI(s string) string {

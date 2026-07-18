@@ -2,12 +2,15 @@ package model
 
 import (
 	"fmt"
+	"github.com/vitikevich-landau/go_magic_eye/internal/text"
 	"reflect"
 	"sort"
 	"strings"
 	"unsafe"
 )
 
+// wordSize — машинное слово платформы: 8 на 64-битных, 4 на 32-битных.
+// Через него считаются все «слова» заголовков (string, slice, interface).
 const wordSize = unsafe.Sizeof(uintptr(0))
 
 // Of — полный осмотр объекта, переданного через any.
@@ -24,7 +27,9 @@ func Of(obj any, label string) *Model {
 			Notes:    []string{"Inspect(nil): в eface нет ни типа, ни данных — смотреть не на что."},
 		}
 	}
-	if rv.Kind() == reflect.Pointer && !rv.IsNil() && rv.Elem().Kind() != reflect.Pointer {
+	if rv.Kind() == reflect.Pointer && !rv.IsNil() {
+		// один уровень разыменования: Inspect(&x) смотрит на x по живому
+		// адресу, какой бы x ни была — хоть сама указателем (**T)
 		m := OfValue(rv.Elem(), label)
 		m.Notes = append(m.Notes, fmt.Sprintf(
 			"принят указатель %s — Око смотрит на оригинал по адресу 0x%x, копий нет.",
@@ -66,6 +71,10 @@ func OfType(t reflect.Type, label string) *Model {
 	return b.m
 }
 
+// passportOf — статика типа. Всё берётся из reflect.Type, объект не нужен:
+// размер и выравнивание компилятор знает на этапе сборки, comparable-ность —
+// свойство типа (slice/map/func делают тип несравнимым), а «видит ли GC» —
+// вопрос «есть ли в типе хоть одно слово-указатель».
 func passportOf(t reflect.Type) Passport {
 	p := Passport{
 		TypeName: typeName(t),
@@ -79,9 +88,9 @@ func passportOf(t reflect.Type) Passport {
 		p.Traits = append(p.Traits, "НЕ comparable (== не скомпилируется)")
 	}
 	if hasPointers(t, 0) {
-		p.Traits = append(p.Traits, "содержит указатели → GC сканирует")
+		p.Traits = append(p.Traits, "содержит указатели "+text.Rune("→", "->")+" GC сканирует")
 	} else {
-		p.Traits = append(p.Traits, "без указателей → GC пропускает целиком")
+		p.Traits = append(p.Traits, "без указателей "+text.Rune("→", "->")+" GC пропускает целиком")
 	}
 	if t.Size() == 0 {
 		p.Traits = append(p.Traits, "нулевой размер (все такие объекты могут делить адрес)")
@@ -99,6 +108,12 @@ func passportOf(t reflect.Type) Passport {
 }
 
 // hasPointers — есть ли в типе слова, интересные GC.
+//
+// Урок: сборщик мусора сканирует объект только если в его типе есть хотя бы
+// одно слово-указатель (в рантайме это решают ptrdata/gcdata типа). Структура
+// из одних чисел — «без указателей»: GC пропускает её целиком, сколько бы
+// мегабайт она ни занимала. Поэтому []struct{X,Y float64} дешевле для GC, чем
+// []*Point — это один из главных практических выводов всей карты памяти.
 func hasPointers(t reflect.Type, depth int) bool {
 	if depth > 10 {
 		return true
@@ -137,6 +152,15 @@ func (b *builder) walk(t reflect.Type, v reflect.Value, off uintptr, path, from 
 	b.leaf(t, v, off, path, from)
 }
 
+// walkStruct — сердце карты памяти. Идём по полям в порядке объявления
+// (Go никогда не переставляет поля — раскладка в руках автора) и держим
+// «конец предыдущего поля» (end): разрыв между end и offset очередного поля —
+// это padding-дыра, и мы знаем её причину — выравнивание следующего поля.
+//
+//	f.Offset   — смещение поля внутри t (посчитал компилятор);
+//	off        — смещение самого t внутри КОРНЕВОГО объекта: при рекурсии
+//	             во вложенные/встроенные структуры смещения складываются,
+//	             поэтому вся карта — в координатах корня.
 func (b *builder) walkStruct(t reflect.Type, v reflect.Value, off uintptr, path, from string, depth int) {
 	if depth > 6 {
 		b.region(Region{Kind: RField, Offset: off, Size: t.Size(),
@@ -155,19 +179,28 @@ func (b *builder) walkStruct(t reflect.Type, v reflect.Value, off uintptr, path,
 			fv = v.Field(i)
 		}
 		name := path + f.Name
-		if f.Anonymous && f.Type.Kind() == reflect.Struct {
+		switch {
+		case f.Anonymous && f.Type.Kind() == reflect.Struct:
+			// встраивание («наследование»): под-объект + рекурсия по его
+			// полям; from помечает, из какого типа поле пришло
 			b.embed(t, f, fo, depth)
 			b.walkStruct(f.Type, fv, fo, path, typeName(f.Type), depth+1)
-		} else if f.Anonymous && f.Type.Kind() == reflect.Pointer {
+		case f.Anonymous && f.Type.Kind() == reflect.Pointer:
+			// встроен УКАЗАТЕЛЬ (struct{ *Base }): в объекте лежит одно
+			// слово-ссылка, никакого под-объекта — честно рисуем указатель
 			b.embed(t, f, fo, depth)
 			b.leaf(f.Type, fv, fo, name, from)
-		} else if f.Type.Kind() == reflect.Struct {
+		case f.Type.Kind() == reflect.Struct:
+			// обычное поле-структура: разворачиваем с префиксом «pos.»
 			b.walkStruct(f.Type, fv, fo, name+".", from, depth+1)
-		} else {
+		default:
 			b.leaf(f.Type, fv, fo, name, from)
 		}
 		end = fo + f.Type.Size()
 	}
+	// Хвостовая дыра: размер структуры всегда кратен её выравниванию — иначе
+	// в массиве []T второй элемент оказался бы невыровнен. (В Go, в отличие
+	// от C++, хвост встроенной структуры НЕ переиспользуется под соседей.)
 	b.gap(end, off+t.Size(),
 		fmt.Sprintf("хвост структуры: размер добит до кратного align (%d)", t.Align()))
 }
@@ -193,6 +226,11 @@ func (b *builder) embed(outer reflect.Type, f reflect.StructField, off uintptr, 
 }
 
 // promoted — методы встроенного типа, продвинутые во внешний.
+//
+// Правило языка: методы анонимного поля входят в method set обёртки (если
+// имя не затенено). Проверяем прямо: берём методы *inner и оставляем те,
+// что находятся и у *outer. Сравниваем по *T — его method set самый полный
+// (включает методы и значения, и указателя).
 func promoted(outer, inner reflect.Type) []string {
 	op := reflect.PointerTo(outer)
 	ip := inner

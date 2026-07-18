@@ -97,7 +97,7 @@ func oneIface(f *model.Iface, o Options) []string {
 		if f.TypedNil || strings.Contains(f.Note, "ловушка") {
 			style = text.CWarn
 		}
-		out = append(out, wrapAt(2, "✦ ", f.Note, o.inner(), style)...)
+		out = append(out, wrapAt(2, text.Rune("✦ ", "* "), f.Note, o.inner(), style)...)
 	}
 	_ = fmt.Sprint
 	return out

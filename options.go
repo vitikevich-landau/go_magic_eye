@@ -46,8 +46,11 @@ func envInt(name string, def int) int {
 
 // loadConfig — раз за вызов: окружение могло смениться между Inspect'ами.
 func loadConfig() config {
+	// автоцвет = «stdout — терминал» И «терминал готов исполнять ANSI»:
+	// на Windows второе требует включить VT-режим консоли (term.EnableColor
+	// делает это сам); EYE_COLOR=1/0 перекрывает автоматику в обе стороны
 	onTTY := term.IsTerminal(os.Stdout.Fd())
-	text.Color = envBool("EYE_COLOR", onTTY)
+	text.Color = envBool("EYE_COLOR", onTTY && term.EnableColor())
 	text.ASCII = envBool("EYE_ASCII", false)
 
 	screen := envInt("EYE_WIDTH", 0)

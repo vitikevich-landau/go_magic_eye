@@ -8,6 +8,7 @@ import "errors"
 
 func isTerminal(fd uintptr) bool { return false }
 func size() (int, int, bool)     { return 0, 0, false }
+func enableColor() bool          { return false }
 func raw() (func(), error) {
 	return nil, errors.New("eye: на этой платформе raw-терминал не поддержан — только статическая печать")
 }

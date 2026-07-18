@@ -103,13 +103,48 @@ func TestScriptQuit(t *testing.T) {
 	}
 }
 
-// Снимок — документ, а не дамп экрана: без ANSI, без хвостовых пробелов,
-// не шире snapWidth, с деревом и деталями.
-func TestSnapshotFileFormat(t *testing.T) {
+// Снимок «s» — ТОЧНАЯ копия экрана: столько же строк, что в кадре, каждая
+// совпадает с экранной с точностью до ANSI и хвостовых пробелов.
+func TestSnapshotExactScreenCopy(t *testing.T) {
 	dir := t.TempDir()
 	app := NewApp(session(t), dir)
 	app.W, app.H = 100, 24
-	for _, tok := range []string{"enter", "down", "s"} {
+	for _, tok := range []string{"enter", "down"} {
+		k, _ := ParseScriptKey(tok)
+		app.Handle(k)
+	}
+	want := app.Frame() // экран, который «видит» пользователь, нажимая s
+	k, _ := ParseScriptKey("s")
+	app.Handle(k)
+
+	data, err := os.ReadFile(filepath.Join(dir, "eye_snap_001.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(got) != len(want) {
+		t.Fatalf("строк в снимке %d, на экране %d", len(got), len(want))
+	}
+	for i := range want {
+		expect := strings.TrimRight(stripANSI(want[i]), " ")
+		if got[i] != expect {
+			t.Fatalf("строка %d разошлась с экраном:\nэкран: %q\nфайл:  %q", i, expect, got[i])
+		}
+	}
+	// второй снимок не затирает первый
+	app.Handle(k)
+	if _, err := os.Stat(filepath.Join(dir, "eye_snap_002.txt")); err != nil {
+		t.Fatal("второй снимок должен получить следующий номер:", err)
+	}
+}
+
+// Снимок «S» — документ: без ANSI, без хвостовых пробелов, не шире
+// snapWidth, с полным деревом и деталями.
+func TestSnapshotDocFormat(t *testing.T) {
+	dir := t.TempDir()
+	app := NewApp(session(t), dir)
+	app.W, app.H = 100, 24
+	for _, tok := range []string{"enter", "down", "S"} {
 		k, _ := ParseScriptKey(tok)
 		app.Handle(k)
 	}
@@ -133,12 +168,6 @@ func TestSnapshotFileFormat(t *testing.T) {
 		if w := text.VisWidth(l); w > snapWidth {
 			t.Fatalf("строка %d шире %d (%d): %q", i, snapWidth, w, l)
 		}
-	}
-	// второй снимок не затирает первый
-	k, _ := ParseScriptKey("s")
-	app.Handle(k)
-	if _, err := os.Stat(filepath.Join(dir, "eye_snap_002.txt")); err != nil {
-		t.Fatal("второй снимок должен получить следующий номер:", err)
 	}
 }
 
@@ -206,5 +235,31 @@ func TestFrameLinesNeverOverflowWidth(t *testing.T) {
 		k, _ := ParseScriptKey(tok)
 		app.Handle(k)
 		check(tok)
+	}
+}
+
+// EYE_ASCII: в кадрах не должно остаться ни одного «богатого» глифа —
+// псевдографики, стрелок, эмодзи (регресс подтверждённой находки ревью).
+func TestASCIIModeHasNoFancyGlyphs(t *testing.T) {
+	oldA, oldC := text.ASCII, text.Color
+	text.ASCII, text.Color = true, false
+	defer func() { text.ASCII, text.Color = oldA, oldC }()
+
+	app := NewApp(session(t), t.TempDir())
+	app.W, app.H = 100, 24
+	check := func(when string, lines []string) {
+		for i, l := range lines {
+			for _, r := range l {
+				if (r >= 0x2190 && r <= 0x2BFF) || r >= 0x1F000 {
+					t.Fatalf("глиф %q (U+%04X) в строке %d после %q:\n%s", r, r, i, when, l)
+				}
+			}
+		}
+	}
+	check("старт", app.Frame())
+	for _, tok := range []string{"enter", "down", "down", "enter", "down", "enter", "tab", "x", "m", "?"} {
+		k, _ := ParseScriptKey(tok)
+		app.Handle(k)
+		check(tok, app.Frame())
 	}
 }

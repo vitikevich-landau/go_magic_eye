@@ -17,11 +17,11 @@ type Scroll struct {
 }
 
 type Lair struct {
-	Alive   *Scroll        // живой: спутник покажет цель, странствие пройдёт
-	Nobody  *Scroll        // nil: честный отказ
-	Erased  uintptr        // голое число-адрес: GC его НЕ охраняет
-	Signal  chan int       // слово → hchan (кольцевой буфер + очереди)
-	Spell   func(int) int  // слово → funcval; имя достанем через FuncForPC
+	Alive    *Scroll       // живой: спутник покажет цель, странствие пройдёт
+	Nobody   *Scroll       // nil: честный отказ
+	Erased   uintptr       // голое число-адрес: GC его НЕ охраняет
+	Signal   chan int      // слово → hchan (кольцевой буфер + очереди)
+	Spell    func(int) int // слово → funcval; имя достанем через FuncForPC
 	Grimoire [64]byte      // длинный регион — свернётся «⋯ ещё N Б ⋯»
 }
 

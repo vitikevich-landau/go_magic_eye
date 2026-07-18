@@ -174,6 +174,37 @@ func TestOfTypeHasNoValues(t *testing.T) {
 	}
 }
 
+// direct-iface: struct{p *T} хранится в слове data ПРЯМО (без коробки).
+// Раньше DynDataValue принимал этот указатель за адрес структуры и читал
+// чужую память.
+func TestDynDataValueDirectIface(t *testing.T) {
+	type wrap struct{ p *hero }
+	h := &hero{armor: 7}
+	var box any = wrap{p: h}
+	v := reflect.ValueOf(&box).Elem()
+	dyn, how, ok := DynDataValue(v)
+	if !ok {
+		t.Fatal("DynDataValue не дал значение")
+	}
+	if !strings.Contains(how, "direct-iface") {
+		t.Fatalf("struct{*T} должен распознаться как direct-iface: %q", how)
+	}
+	got := dyn.Field(0)
+	if got.Pointer() != uintptr(unsafe.Pointer(h)) {
+		t.Fatalf("указатель внутри разъехался: 0x%x vs %p", got.Pointer(), h)
+	}
+	// не-direct структура (два поля) идёт через NewAt по адресу коробки
+	type fat struct{ a, b *hero }
+	box = fat{a: h, b: h}
+	dyn, how, ok = DynDataValue(reflect.ValueOf(&box).Elem())
+	if !ok || strings.Contains(how, "direct-iface") {
+		t.Fatalf("fat не direct-iface: ok=%v how=%q", ok, how)
+	}
+	if dyn.Field(0).Pointer() != uintptr(unsafe.Pointer(h)) {
+		t.Fatal("NewAt-путь потерял данные")
+	}
+}
+
 func TestOfValueSemantics(t *testing.T) {
 	x := 42
 	m := Of(x, "копия")

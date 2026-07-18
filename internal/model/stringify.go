@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"github.com/vitikevich-landau/go_magic_eye/internal/text"
 	"reflect"
 	"runtime"
 	"strconv"
@@ -10,9 +11,15 @@ import (
 )
 
 // readable снимает с адресуемого значения запрет reflect на чтение
-// неэкспортированных полей: NewAt по живому адресу даёт «чистый» Value.
-// Это легальный приём (unsafe, но задокументированный) — и главный учебный
-// пункт: в Go рефлексия видит ВСЁ, макросы-реестры не нужны.
+// неэкспортированных полей.
+//
+// Как это работает: у Value, полученного из чужого приватного поля, взведён
+// внутренний флаг flagRO — он запрещает ровно два метода: Interface() и Set.
+// Но адрес у поля настоящий, и NewAt по этому адресу создаёт НОВЫЙ Value того
+// же типа уже без flagRO — мы будто «подошли к той же памяти с другой
+// стороны». Приём легален (unsafe, но задокументирован у reflect.NewAt) и
+// является главным учебным пунктом проекта: в Go рефлексия видит ВСЁ,
+// макросы-реестры C++-предка (EYE_DESCRIBE) не нужны.
 func readable(v reflect.Value) reflect.Value {
 	if v.CanInterface() {
 		return v
@@ -74,10 +81,21 @@ func kindName(t reflect.Type) string {
 }
 
 // quote — строка для превью: экранированная, обрезанная до max рун.
+// Сначала грубая обрезка по байтам (руна ≤ 4 Б): превью в 16 рун не повод
+// разворачивать в []rune строку на сотню мегабайт.
 func quote(s string, max int) string {
+	trimmed := false
+	if len(s) > 4*max {
+		s = s[:4*max]
+		trimmed = true
+	}
 	r := []rune(s)
 	if len(r) > max {
-		return strconv.Quote(string(r[:max])) + "…"
+		r = r[:max]
+		trimmed = true
+	}
+	if trimmed {
+		return strconv.Quote(string(r)) + "…"
 	}
 	return strconv.Quote(s)
 }
@@ -100,7 +118,11 @@ func FmtVal(v reflect.Value) string { return fmtVal(v, 0) }
 func Readable(v reflect.Value) reflect.Value { return readable(v) }
 
 // fmtVal — краткое строковое значение для превью/элементов.
-// Работает и на неэкспортированных значениях: только kind-геттеры reflect.
+//
+// Работает и на неэкспортированных значениях, потому что пользуется только
+// kind-геттерами reflect (Int, Uint, Len, Pointer, …) — запрет flagRO
+// распространяется лишь на Interface()/Set. Глубина ограничена двумя
+// уровнями: это превью для одной строки дерева, а не полный дамп.
 func fmtVal(v reflect.Value, depth int) string {
 	if !v.IsValid() {
 		return "nil"
@@ -126,7 +148,7 @@ func fmtVal(v reflect.Value, depth int) string {
 		if v.IsNil() {
 			return "nil"
 		}
-		return fmt.Sprintf("→0x%x", v.Pointer())
+		return fmt.Sprintf("%s0x%x", text.Rune("→", "->"), v.Pointer())
 	case reflect.Chan, reflect.Func:
 		if v.IsNil() {
 			return "nil"

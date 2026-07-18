@@ -8,7 +8,12 @@ import "unicode/utf8"
 type KeyType int
 
 const (
-	KRune KeyType = iota
+	// KIgnore — «клавиша-пустышка»: нераспознанная ESC-последовательность
+	// (Delete, Insert, F2–F12, мышиные репорты…). Раньше такие декодировались
+	// как Esc — и Delete закрывал всё странствие. Теперь они честно
+	// проглатываются.
+	KIgnore KeyType = iota
+	KRune
 	KUp
 	KDown
 	KLeft
@@ -32,8 +37,14 @@ type Key struct {
 }
 
 // Decoder — конечный автомат: байты (кусками любого размера) → клавиши.
-// Незавершённые ESC-последовательности ждут следующего куска; одинокий ESC
-// добывается вызовом Flush по таймауту.
+//
+// Почему это вообще автомат: терминал шлёт не «клавиши», а байты, и клавиша
+// может приехать разрезанной на два read'а. Стрелка ↑ — это ТРИ байта
+// «ESC [ A»; русская буква — два байта UTF-8; а одинокий байт ESC значит
+// «пользователь нажал Esc»… либо «сейчас доедет хвост стрелки». Поэтому
+// незавершённые последовательности ждут следующего куска в buf, а одинокий
+// ESC добывается вызовом Flush по таймауту тика (~100 мс тишины = это
+// точно был Esc, а не начало стрелки).
 type Decoder struct{ buf []byte }
 
 // Feed скармливает очередной кусок байтов и возвращает готовые клавиши.
@@ -51,13 +62,22 @@ func (d *Decoder) Feed(b []byte) []Key {
 	return out
 }
 
-// Flush — таймаут: недоеденный одинокий ESC становится клавишей Esc.
+// Flush — таймаут тишины: недоеденная ESC-последовательность дозревает.
+// Одинокий ESC становится клавишей Esc; оборванный «ESC [»/«ESC O» (терминал
+// завис, Alt+скобка) — тоже Esc, а хвост разбирается заново как обычные
+// байты. Без этого декодер застревал бы: следующая настоящая клавиша
+// приклеивалась бы к огрызку и пропадала.
 func (d *Decoder) Flush() []Key {
-	if len(d.buf) == 1 && d.buf[0] == 0x1b {
-		d.buf = d.buf[:0]
-		return []Key{{Type: KEsc}}
+	if len(d.buf) == 0 || d.buf[0] != 0x1b {
+		return nil
 	}
-	return nil
+	rest := append([]byte(nil), d.buf[1:]...)
+	d.buf = d.buf[:0]
+	keys := []Key{{Type: KEsc}}
+	if len(rest) > 0 {
+		keys = append(keys, d.Feed(rest)...)
+	}
+	return keys
 }
 
 // next пытается снять одну клавишу с начала буфера.
@@ -88,7 +108,15 @@ func (d *Decoder) next() (Key, int, bool) {
 	return Key{Type: KRune, R: r}, n, true
 }
 
-// escape разбирает ESC-последовательности: CSI (ESC [ … буква) и SS3 (ESC O x).
+// escape разбирает ESC-последовательности.
+//
+// Два семейства (наследие древних терминалов DEC VT100):
+//
+//	CSI: ESC [ <параметры-цифры-и-точки-с-запятой> <финальная буква>
+//	     ESC[A — стрелка ↑, ESC[5~ — PgUp, ESC[1;5C — Ctrl+→ …
+//	SS3: ESC O <буква> — те же стрелки в «application mode», F1-F4
+//
+// Финальная буква и решает, что это было; параметры до неё копятся.
 func (d *Decoder) escape() (Key, int, bool) {
 	b := d.buf
 	if len(b) == 1 {
@@ -103,8 +131,8 @@ func (d *Decoder) escape() (Key, int, bool) {
 			}
 			return csiKey(string(b[2:i]), c), i + 1, true
 		}
-		if len(b) > 16 { // мусорная последовательность — сбросить
-			return Key{Type: KEsc}, len(b), true
+		if len(b) > 16 { // мусорная последовательность — молча проглотить
+			return Key{Type: KIgnore}, len(b), true
 		}
 		return Key{}, 0, false
 	case 'O':
@@ -127,9 +155,10 @@ func (d *Decoder) escape() (Key, int, bool) {
 		case 'P':
 			return Key{Type: KF1}, 3, true
 		}
-		return Key{Type: KEsc}, 3, true
+		return Key{Type: KIgnore}, 3, true // F2-F4 и прочее — не выход!
 	default:
-		// ESC + обычный байт: считаем одиноким ESC, байт оставляем
+		// ESC + обычный байт (Alt+клавиша): считаем одиноким ESC, байт
+		// оставляем — разберётся следующим заходом
 		return Key{Type: KEsc}, 1, true
 	}
 }
@@ -166,5 +195,8 @@ func csiKey(params string, final byte) Key {
 	case 'P':
 		return Key{Type: KF1}
 	}
-	return Key{Type: KEsc}
+	// Delete (3~), Insert (2~), F5-F12, Ctrl+стрелки с параметрами и весь
+	// прочий зоопарк: у Ока для них нет действия. Раньше сюда возвращался
+	// KEsc — и Delete ВЫХОДИЛ из странствия; теперь — пустышка.
+	return Key{Type: KIgnore}
 }

@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"io"
+
+	"github.com/vitikevich-landau/go_magic_eye/internal/text"
 )
 
 // Script-режим (EYE_SCRIPT="down enter q"): исполнить клавиши из строки и
@@ -33,8 +35,9 @@ func ParseScriptKey(tok string) (Key, bool) {
 // RunScript — кадр за кадром: начальный, затем после каждой клавиши.
 func (a *App) RunScript(tokens []string, w io.Writer, width, height int) {
 	a.W, a.H = width, height
+	rule := text.Rune("══", "==") // разделители кадров тоже уважают EYE_ASCII
 	frame := func(title string) {
-		fmt.Fprintf(w, "══ кадр: %s ══\n", title)
+		fmt.Fprintf(w, "%s кадр: %s %s\n", rule, title, rule)
 		for _, l := range a.Frame() {
 			fmt.Fprintln(w, l)
 		}
@@ -43,11 +46,11 @@ func (a *App) RunScript(tokens []string, w io.Writer, width, height int) {
 	for _, tok := range tokens {
 		k, ok := ParseScriptKey(tok)
 		if !ok {
-			fmt.Fprintf(w, "── клавиша «%s» не понята — пропущена ──\n", tok)
+			fmt.Fprintf(w, "%s клавиша «%s» не понята — пропущена\n", rule, tok)
 			continue
 		}
 		if a.Handle(k) {
-			fmt.Fprintf(w, "══ выход по «%s» ══\n", tok)
+			fmt.Fprintf(w, "%s выход по «%s»\n", rule, tok)
 			return
 		}
 		frame(tok)

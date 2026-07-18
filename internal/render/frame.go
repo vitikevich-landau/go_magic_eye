@@ -34,6 +34,10 @@ func frame(title string, content []string, o Options) []string {
 	top := &text.Line{}
 	top.Add(text.CFrame, gTL()+gH())
 	if title != "" {
+		// длинное имя типа (дженерики!) не должно делать шапку шире рамки
+		if maxT := w - 8; text.VisWidth(title) > maxT {
+			title = text.ClipVis(title, maxT)
+		}
 		top.Add(text.CFrame, text.Rune("‹ ", "[ "))
 		top.Add(text.CTitle, title)
 		top.Add(text.CFrame, text.Rune(" ›", " ]"))

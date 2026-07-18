@@ -1,6 +1,7 @@
 package eye
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -74,6 +75,11 @@ func (g *Gallery) Run() {
 	}
 	app := tui.NewApp(g.session(), os.Getenv("EYE_SNAP_DIR"))
 	if err := app.Run(); err != nil {
+		if errors.Is(err, tui.ErrInterrupted) {
+			// Ctrl-C/SIGTERM: терминал уже восстановлен цельным путём
+			// (без гонок с отрисовкой) — уходим принятым для Unix кодом
+			os.Exit(130)
+		}
 		// терминал не дался (странная консоль?) — честно печатаем статикой
 		fmt.Fprintln(os.Stderr, "eye:", err)
 		g.printAll(cfg)
@@ -81,6 +87,11 @@ func (g *Gallery) Run() {
 }
 
 // session — граф странствия из корней галереи.
+//
+// Дисциплина адресуемости та же, что у Inspect: указатель → живой оригинал
+// (v.Elem() адресуем — Око смотрит на память пользователя), значение →
+// адресуемая коробка reflect.New (честная копия). Без адресуемости не
+// работали бы ни чтение приватных полей (NewAt), ни байтовые дампы.
 func (g *Gallery) session() *nav.Session {
 	s := nav.NewSession()
 	for _, r := range g.roots {
@@ -94,13 +105,15 @@ func (g *Gallery) session() *nav.Session {
 			continue
 		}
 		// та же дисциплина, что у Inspect: указатель — живой оригинал,
-		// значение — адресуемая коробка
-		if rv.Kind() == reflect.Pointer && !rv.IsNil() && rv.Elem().Kind() != reflect.Pointer {
+		// значение — адресуемая коробка (и она честно помечена копией)
+		if rv.Kind() == reflect.Pointer && !rv.IsNil() {
 			s.AddRoot(rv.Elem(), r.label)
 		} else {
 			box := reflect.New(rv.Type())
 			box.Elem().Set(rv)
-			s.AddRoot(box.Elem(), r.label)
+			n := s.AddRoot(box.Elem(), r.label)
+			n.Copied = "корень добавлен ПО ЗНАЧЕНИЮ: это коробка-копия (упаковка в any); " +
+				"указатели внутри ведут к живым данным. Хочешь оригинал — Add(&объект)"
 		}
 	}
 	return s

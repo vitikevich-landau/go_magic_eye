@@ -20,11 +20,11 @@ const (
 )
 
 func main() {
-	answer := 0x2A                // int: 8 байт на 64-битной платформе
-	price := int16(-2)            // два байта: дополнительный код (0xfffe)
-	grade := KnightRank           // «enum» — на деле один байт
-	pi := 3.1415926535            // float64: IEEE-754 в шестнадцати hex-цифрах
-	ptr := &answer                // указатель: слово-адрес, GC его видит
+	answer := 0x2A      // int: 8 байт на 64-битной платформе
+	price := int16(-2)  // два байта: дополнительный код (0xfffe)
+	grade := KnightRank // «enum» — на деле один байт
+	pi := 3.1415926535  // float64: IEEE-754 в шестнадцати hex-цифрах
+	ptr := &answer      // указатель: слово-адрес, GC его видит
 
 	eye.Inspect(&answer, "ответ")
 	eye.Inspect(&price, "цена со знаком")

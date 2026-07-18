@@ -5,6 +5,7 @@ package nav
 
 import (
 	"fmt"
+	"github.com/vitikevich-landau/go_magic_eye/internal/text"
 	"reflect"
 
 	"github.com/vitikevich-landau/go_magic_eye/internal/model"
@@ -85,7 +86,7 @@ func (n *Node) Detail() *model.Model {
 			label += " (копия)"
 		}
 		if n.Cycle != nil {
-			n.detail = &model.Model{Label: "цикл ⟲", Notes: []string{
+			n.detail = &model.Model{Label: "цикл " + text.Rune("⟲", "@"), Notes: []string{
 				"этот адрес уже показан в дереве — дублей Око не плодит.",
 				"Enter — прыжок к существующему узлу; b — назад.",
 			}}
@@ -94,13 +95,47 @@ func (n *Node) Detail() *model.Model {
 		} else if n.Val.IsValid() {
 			n.detail = model.OfValue(n.Val, label)
 			if n.Copied != "" {
-				n.detail.Notes = append(n.detail.Notes, "⚠ "+n.Copied)
+				n.detail.Notes = append(n.detail.Notes, text.Rune("⚠", "!")+" "+n.Copied)
 			}
 		} else {
 			n.detail = &model.Model{Label: label}
 		}
 	}
 	return n.detail
+}
+
+// Explain — почему узел не раскрывается: готовый Refusal (если дети уже
+// строились) или причина по типу. Пустая строка = узел раскрываем или
+// просто лист без драмы. Нужен TUI: Enter на тупике должен ГОВОРИТЬ, а не
+// молчать — «честные отказы» из README обязаны быть видимыми.
+func (n *Node) Explain() string {
+	if n.Refusal != "" {
+		return n.Refusal
+	}
+	if n.TypeOnly != nil || !n.Val.IsValid() {
+		return ""
+	}
+	switch n.Val.Kind() {
+	case reflect.Pointer:
+		if n.Val.IsNil() {
+			return "nil: идти некуда"
+		}
+	case reflect.Interface:
+		if n.Val.IsNil() {
+			return "nil интерфейс: ни типа, ни данных"
+		}
+	case reflect.Map:
+		if n.Val.IsNil() {
+			return "nil map"
+		}
+	case reflect.UnsafePointer:
+		return "unsafe.Pointer: тип стёрт — Око по нему не пойдёт"
+	case reflect.Func:
+		return "функция: код, не данные (имя видно в деталях)"
+	case reflect.Chan:
+		return "канал: содержимое живёт в hchan, читать его — украсть у горутин"
+	}
+	return ""
 }
 
 // Addr — адрес живого значения узла (0, если неадресуемо).

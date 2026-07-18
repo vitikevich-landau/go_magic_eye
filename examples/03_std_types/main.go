@@ -12,11 +12,11 @@ import (
 )
 
 type Vault struct {
-	Motto   string         // литерал: буфер в .rodata, НЕ в куче
-	Forged  string         // построенная строка: буфер в куче
-	Coins   []int64        // len 3, cap 8: виден cap-хвост под append
-	Runes   [4]rune        // массив: 16 байт прямо в структуре
-	Ledger  map[string]int // слово-указатель на бакеты
+	Motto  string         // литерал: буфер в .rodata, НЕ в куче
+	Forged string         // построенная строка: буфер в куче
+	Coins  []int64        // len 3, cap 8: виден cap-хвост под append
+	Runes  [4]rune        // массив: 16 байт прямо в структуре
+	Ledger map[string]int // слово-указатель на бакеты
 }
 
 func main() {

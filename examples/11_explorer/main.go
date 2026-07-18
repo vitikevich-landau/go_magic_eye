@@ -7,8 +7,8 @@ import (
 )
 
 type Loot struct {
-	Gold  int
-	Gems  []string
+	Gold int
+	Gems []string
 }
 
 type Unit struct {

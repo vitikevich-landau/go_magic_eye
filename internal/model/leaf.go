@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"github.com/vitikevich-landau/go_magic_eye/internal/text"
 	"reflect"
 	"unsafe"
 )
@@ -72,7 +73,7 @@ func (b *builder) leaf(t reflect.Type, v reflect.Value, off uintptr, name, from 
 			r.Value = fmtVal(v, 0)
 		}
 	case reflect.Map:
-		r.Note = "одно слово: *runtime.hmap → снаружи бакеты по 8 ячеек (см. спутник)"
+		r.Note = "одно слово: *runtime.hmap " + text.Rune("→", "->") + " снаружи бакеты по 8 ячеек (см. спутник)"
 		if hasV {
 			if v.IsNil() {
 				r.Value = "nil map (читать можно, писать — panic)"
@@ -82,7 +83,7 @@ func (b *builder) leaf(t reflect.Type, v reflect.Value, off uintptr, name, from 
 			}
 		}
 	case reflect.Chan:
-		r.Note = "одно слово: *runtime.hchan → кольцевой буфер + очереди горутин"
+		r.Note = "одно слово: *runtime.hchan " + text.Rune("→", "->") + " кольцевой буфер + очереди горутин"
 		if hasV {
 			if v.IsNil() {
 				r.Value = "nil chan (приём/передача заблокируются навсегда)"
@@ -96,7 +97,7 @@ func (b *builder) leaf(t reflect.Type, v reflect.Value, off uintptr, name, from 
 			if v.IsNil() {
 				r.Value = "nil func"
 			} else {
-				r.Value = fmt.Sprintf("0x%x → %s", v.Pointer(), funcName(v.Pointer()))
+				r.Value = fmt.Sprintf("0x%x %s %s", v.Pointer(), text.Rune("→", "->"), funcName(v.Pointer()))
 			}
 		}
 
@@ -105,7 +106,7 @@ func (b *builder) leaf(t reflect.Type, v reflect.Value, off uintptr, name, from 
 			if v.IsNil() {
 				r.Value = "nil"
 			} else {
-				r.Value = fmt.Sprintf("→ 0x%x", v.Pointer())
+				r.Value = fmt.Sprintf("%s 0x%x", text.Rune("→", "->"), v.Pointer())
 				b.ptrSat(r.Name, v)
 			}
 		}
@@ -115,7 +116,7 @@ func (b *builder) leaf(t reflect.Type, v reflect.Value, off uintptr, name, from 
 			if v.IsNil() {
 				r.Value = "nil"
 			} else {
-				r.Value = fmt.Sprintf("→ 0x%x (?)", v.Pointer())
+				r.Value = fmt.Sprintf("%s 0x%x (?)", text.Rune("→", "->"), v.Pointer())
 			}
 		}
 
@@ -137,6 +138,8 @@ func (b *builder) leaf(t reflect.Type, v reflect.Value, off uintptr, name, from 
 	b.region(r)
 }
 
+// mask — маска значащих байт: hex-представление int8(-2) должно показать
+// 0xfe, а не 0xfffffffffffffffe (знаковое расширение до int64 при v.Int()).
 func mask(size uintptr) uint64 {
 	if size >= 8 {
 		return ^uint64(0)
@@ -144,15 +147,30 @@ func mask(size uintptr) uint64 {
 	return 1<<(8*size) - 1
 }
 
-// teachLE — урок little-endian: один раз, на первом многобайтовом целом.
+// littleEndian — порядок байт ЭТОЙ машины, определённый честно, в рантайме:
+// кладём uint16(1) и смотрим, какой байт лёг первым. Почти всюду Go живёт на
+// little-endian (amd64/arm64/386/riscv), но s390x, mips и ppc64 — big-endian,
+// и врать про них урок не должен.
+var littleEndian = func() bool {
+	x := uint16(1)
+	return *(*byte)(unsafe.Pointer(&x)) == 1
+}()
+
+// teachLE — урок порядка байт: один раз, на первом многобайтовом целом.
 func (b *builder) teachLE(r *Region, t reflect.Type) {
 	if b.leTaught || t.Size() < 2 {
 		return
 	}
 	b.leTaught = true
-	r.Note = "little-endian: в дампе младший байт стоит ПЕРВЫМ — читай hex справа налево"
+	if littleEndian {
+		r.Note = "little-endian: в дампе младший байт стоит ПЕРВЫМ — читай hex справа налево"
+	} else {
+		r.Note = "big-endian (экзотика: s390x/mips/ppc64): старший байт первым — hex читается слева направо"
+	}
 }
 
+// strData — адрес байтового буфера строки (слово data её заголовка).
+// У пустой строки буфера может не быть вовсе — честный 0.
 func strData(s string) uintptr {
 	if len(s) == 0 {
 		return 0
@@ -161,6 +179,12 @@ func strData(s string) uintptr {
 }
 
 // ── спутники: память вне объекта ────────────────────────────────────────────
+//
+// В самом объекте лежат только ЗАГОЛОВКИ (data+len, data+len+cap, *hmap).
+// Настоящее содержимое живёт где-то ещё — в .rodata или куче. Спутник — это
+// панель «а вот что по ту сторону указателя»: байты берутся unsafe.Slice
+// прямо поверх живой памяти, без копий (потому и контракт: объект должен
+// жить, пока Око смотрит).
 
 const satElems = 16 // элементов в статическом превью спутника
 
@@ -188,7 +212,7 @@ func (b *builder) sliceSat(name string, v reflect.Value) {
 		sat.Elems = append(sat.Elems, fmt.Sprintf("[%d] %s", i, fmtVal(v.Index(i), 1)))
 	}
 	if n > satElems {
-		sat.Elems = append(sat.Elems, fmt.Sprintf("⋯ ещё %d элем. (странствие покажет постранично)", n-satElems))
+		sat.Elems = append(sat.Elems, fmt.Sprintf("%s ещё %d элем. (странствие покажет постранично)", text.Rune("⋯", "..."), n-satElems))
 	}
 	if extra := v.Cap() - n; extra > 0 {
 		sat.Note = fmt.Sprintf("за len прячется cap-хвост: ещё %d слотов уже выделено — append туда, без реаллокации", extra)
@@ -205,11 +229,11 @@ func (b *builder) mapSat(name string, v reflect.Value) {
 	it := v.MapRange()
 	i := 0
 	for it.Next() && i < satElems {
-		sat.Elems = append(sat.Elems, fmt.Sprintf("%s → %s", fmtVal(it.Key(), 1), fmtVal(it.Value(), 1)))
+		sat.Elems = append(sat.Elems, fmt.Sprintf("%s %s %s", fmtVal(it.Key(), 1), text.Rune("→", "->"), fmtVal(it.Value(), 1)))
 		i++
 	}
 	if v.Len() > satElems {
-		sat.Elems = append(sat.Elems, fmt.Sprintf("⋯ ещё %d пар ⋯", v.Len()-satElems))
+		sat.Elems = append(sat.Elems, fmt.Sprintf("%s ещё %d пар", text.Rune("⋯", "..."), v.Len()-satElems))
 	}
 	b.m.Sats = append(b.m.Sats, sat)
 }
@@ -241,7 +265,7 @@ func (b *builder) ifaceLeaf(t reflect.Type, v reflect.Value, name string) string
 	val := fmt.Sprintf("тип %s · tab 0x%x · data 0x%x",
 		info.DynType, info.TabAddr, info.DataAddr)
 	if info.TypedNil {
-		val += " ← ЛОВУШКА: typed nil"
+		val += " " + text.Rune("←", "<-") + " ЛОВУШКА: typed nil"
 	}
 	return val
 }

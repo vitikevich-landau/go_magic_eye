@@ -47,7 +47,7 @@ func RenderPanel(m *model.Model, o Options, p Panel) []string {
 			body = append(body, embedLines(m, o)...)
 		}
 		for _, n := range m.Notes {
-			body = append(body, wrap("✦ ", n, o.inner(), text.CNote)...)
+			body = append(body, wrap(text.Rune("✦ ", "* "), n, o.inner(), text.CNote)...)
 		}
 	case PanelIface:
 		if len(m.Ifaces) == 0 {
@@ -76,7 +76,7 @@ func Render(m *model.Model, o Options) []string {
 	if m.Passport.TypeName == "" && len(m.Regions) == 0 {
 		var body []string
 		for _, n := range m.Notes {
-			body = append(body, wrap("✦ ", n, o.inner(), text.CNote)...)
+			body = append(body, wrap(text.Rune("✦ ", "* "), n, o.inner(), text.CNote)...)
 		}
 		return frame(m.Label, body, o)
 	}
@@ -95,7 +95,7 @@ func Render(m *model.Model, o Options) []string {
 	if len(m.Notes) > 0 {
 		body = append(body, "", section("свиток заметок", o))
 		for _, n := range m.Notes {
-			body = append(body, wrap("✦ ", n, o.inner(), text.CNote)...)
+			body = append(body, wrap(text.Rune("✦ ", "* "), n, o.inner(), text.CNote)...)
 		}
 	}
 
@@ -135,7 +135,7 @@ func passportLines(m *model.Model, o Options) []string {
 		if strings.HasPrefix(tr, "НЕ ") {
 			style = text.CWarn
 		}
-		out = append(out, (&text.Line{}).Add(text.CFrame, "  • ").Add(style, tr).String())
+		out = append(out, (&text.Line{}).Add(text.CFrame, "  "+text.Rune("• ", "* ")).Add(style, tr).String())
 	}
 	return out
 }
@@ -159,7 +159,7 @@ func embedLines(m *model.Model, o Options) []string {
 			out = append(out, p.String())
 		}
 		if e.Note != "" {
-			out = append(out, wrapAt(e.Depth*2+2, "⚠ ", e.Note, o.inner(), text.CWarn)...)
+			out = append(out, wrapAt(e.Depth*2+2, text.Rune("⚠ ", "! "), e.Note, o.inner(), text.CWarn)...)
 		}
 	}
 	return out
@@ -182,7 +182,7 @@ func satLines(s *model.Satellite, o Options) []string {
 		body = append(body, (&text.Line{}).Add(text.CVal, "  "+e).String())
 	}
 	if s.Note != "" {
-		body = append(body, wrap("✦ ", s.Note, o.inner(), text.CNote)...)
+		body = append(body, wrap(text.Rune("✦ ", "* "), s.Note, o.inner(), text.CNote)...)
 	}
 	so := o
 	so.Width = o.Width - 4
@@ -223,8 +223,9 @@ func hexDump(b []byte, base uintptr, o Options) []string {
 		out = append(out, l.String())
 	}
 	if limit < rows {
-		out = append(out, (&text.Line{}).Addf(text.CNote, "  ⋯ ещё %d Б (EYE_FULL=1 покажет всё) ⋯",
-			len(b)-limit*perRow).String())
+		dots := text.Rune("⋯", "...")
+		out = append(out, (&text.Line{}).Addf(text.CNote, "  %s ещё %d Б (EYE_FULL=1 покажет всё) %s",
+			dots, len(b)-limit*perRow, dots).String())
 	}
 	return out
 }

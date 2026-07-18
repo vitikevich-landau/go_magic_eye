@@ -1,10 +1,16 @@
 package nav
 
 import (
+	"github.com/vitikevich-landau/go_magic_eye/internal/text"
 	"reflect"
 	"strings"
 )
 
+// seenKey — «паспорт» уже показанного места: адрес + тип. Один только адрес
+// не годится: по offset 0 структуры живут и она сама, и её первое поле, и
+// встроенная база — типы различают их. Благодаря этой карте указатель на уже
+// показанный объект даёт узел-ссылку ⟲ вместо бесконечного дубля (иначе
+// пара рыцарей, дружащих друг с другом, разворачивалась бы вечно).
 type seenKey struct {
 	addr uintptr
 	t    reflect.Type
@@ -42,7 +48,7 @@ func (s *Session) AddTypeRoot(t reflect.Type, label string) *Node {
 	if label == "" {
 		label = t.String()
 	}
-	n := &Node{Label: "⌘ " + label, Sub: "только статика типа", TypeOnly: t, sess: s}
+	n := &Node{Label: text.Rune("⌘ ", "T ") + label, Sub: "только статика типа", TypeOnly: t, sess: s}
 	s.Roots = append(s.Roots, n)
 	s.Refresh()
 	return n
@@ -58,6 +64,12 @@ func (s *Session) remember(n *Node) {
 }
 
 // Refresh пересчитывает плоский список видимых узлов (после expand/collapse).
+//
+// Дерево на экране — это на самом деле СПИСОК: обход в глубину по раскрытым
+// узлам. Курсор — индекс в этом списке, прокрутка — окно по нему. Такое
+// представление сводит всю навигацию к арифметике индексов; платим за это
+// пересчётом списка после каждого раскрытия/сворачивания (дёшево: дети уже
+// построены, обход — только по раскрытым).
 func (s *Session) Refresh() {
 	s.visible = s.visible[:0]
 	var walk func(n *Node)
@@ -221,10 +233,13 @@ func (s *Session) Search(query string, backwards bool) bool {
 	n := len(s.visible)
 	step := 1
 	if backwards {
-		step = n - 1
+		step = -1
 	}
+	// шаг за шагом по кольцу (без умножений — off*step переполнялся бы
+	// на 32-битных платформах при десятках тысяч видимых узлов)
+	i := s.Cursor
 	for off := 1; off <= n; off++ {
-		i := (s.Cursor + off*step) % n
+		i = (i + step + n) % n
 		node := s.visible[i]
 		if strings.Contains(strings.ToLower(node.Label), q) ||
 			strings.Contains(strings.ToLower(node.Sub), q) {

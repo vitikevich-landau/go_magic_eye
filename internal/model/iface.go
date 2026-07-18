@@ -101,11 +101,31 @@ func firstNonEmpty(a, b string) string {
 	return b
 }
 
+// isDirectIface — хранится ли значение типа t в слове data ПРЯМО (а не за
+// указателем). Это точная копия правила runtime (isdirectiface): прямыми
+// бывают не только ptr/map/chan/func/unsafe.Pointer, но и — сюрприз —
+// структура с ЕДИНСТВЕННЫМ прямым полем (struct{ p *T }) и массив [1]T из
+// прямого T: их представление — одно слово-указатель, и рантайм кладёт его
+// в data как есть. Прочитать такое NewAt'ом по «адресу» data — значит
+// принять сам указатель за адрес структуры и уехать в чужую память.
+func isDirectIface(t reflect.Type) bool {
+	switch t.Kind() {
+	case reflect.Pointer, reflect.Map, reflect.Chan, reflect.Func, reflect.UnsafePointer:
+		return true
+	case reflect.Struct:
+		return t.NumField() == 1 && isDirectIface(t.Field(0).Type)
+	case reflect.Array:
+		return t.Len() == 1 && isDirectIface(t.Elem())
+	}
+	return false
+}
+
 // DynDataValue — живое динамическое значение интерфейса для странствия.
 //
-// Если данные лежат за указателем (data — адрес), возвращаем значение ПО МЕСТУ
-// (NewAt — живая память коробки). Если значение pointer-shaped (сам ptr/map/
-// chan/func — data и есть значение), синтезируем его копию: она укажет туда же.
+// Если данные лежат за указателем (data — адрес коробки), возвращаем значение
+// ПО МЕСТУ (NewAt — живая память). Если тип direct-iface (см. isDirectIface —
+// слово data и ЕСТЬ значение), синтезируем коробку и кладём слово в неё:
+// содержимое укажет туда же, куда и оригинал.
 func DynDataValue(v reflect.Value) (reflect.Value, string, bool) {
 	v = readable(v)
 	if v.Kind() != reflect.Interface || v.IsNil() {
@@ -114,31 +134,24 @@ func DynDataValue(v reflect.Value) (reflect.Value, string, bool) {
 	dyn := v.Elem()
 	dt := dyn.Type()
 	if !v.CanAddr() {
-		box := reflect.New(dyn.Type())
-		box.Elem().Set(reflect.ValueOf(dynIface(dyn)))
-		return box.Elem(), "копия (интерфейс не был адресуем)", true
-	}
-	p := unsafe.Pointer(v.UnsafeAddr())
-	data := *(*unsafe.Pointer)(unsafe.Add(p, wordSize))
-	switch dt.Kind() {
-	case reflect.Pointer, reflect.Map, reflect.Chan, reflect.Func, reflect.UnsafePointer:
-		// pointer-shaped: слово data — само значение
-		box := reflect.New(dt)
-		*(*unsafe.Pointer)(unsafe.Pointer(box.Pointer())) = data
-		return box.Elem(), "pointer-shaped: слово data — само значение", true
-	default:
-		if data == nil {
+		// интерфейс не адресуем (теоретический путь): без адреса слово data
+		// не прочитать; берём значение через Interface, если позволено
+		if !dyn.CanInterface() {
 			return reflect.Value{}, "", false
 		}
-		return reflect.NewAt(dt, data).Elem(), fmt.Sprintf("живые данные коробки @0x%x", uintptr(data)), true
+		box := reflect.New(dt)
+		box.Elem().Set(reflect.ValueOf(dyn.Interface()))
+		return box.Elem(), "копия (интерфейс не был адресуем)", true
 	}
-}
-
-func dynIface(dyn reflect.Value) any {
-	if dyn.CanInterface() {
-		return dyn.Interface()
+	p := v.Addr().UnsafePointer()
+	data := *(*unsafe.Pointer)(unsafe.Add(p, wordSize))
+	if isDirectIface(dt) {
+		box := reflect.New(dt)
+		*(*unsafe.Pointer)(box.UnsafePointer()) = data
+		return box.Elem(), "direct-iface: слово data — само значение", true
 	}
-	box := reflect.New(dyn.Type())
-	box.Elem().Set(dyn) // не случится: dyn от readable
-	return box.Elem().Interface()
+	if data == nil {
+		return reflect.Value{}, "", false
+	}
+	return reflect.NewAt(dt, data).Elem(), fmt.Sprintf("живые данные коробки @0x%x", uintptr(data)), true
 }
