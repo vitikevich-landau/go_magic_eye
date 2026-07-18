@@ -1,6 +1,7 @@
 package eye
 
 import (
+	"io"
 	"os"
 	"strconv"
 
@@ -9,7 +10,14 @@ import (
 	"github.com/vitikevich-landau/go_magic_eye/internal/text"
 )
 
-// Настройки Ока читаются из окружения — те же рычаги, что в C++-версии:
+// Настройки Ока задаются двумя рычагами:
+//
+//   - опциями With* — программно, на конкретный вызов (Finspect, FinspectType,
+//     NewGallery);
+//   - переменными окружения EYE_* — извне, без перекомпиляции (те же рычаги,
+//     что в C++-версии).
+//
+// Приоритет: опция > переменная окружения > автоматика (терминал/дефолт).
 //
 //	EYE_WIDTH=N        считать терминал N колонок (иначе определяем сами)
 //	EYE_CENTER=0       не центрировать — прижать влево
@@ -22,17 +30,68 @@ import (
 //	EYE_SNAP_DIR=…     каталог для снимков экрана клавишей s
 
 type config struct {
-	width  int
+	out    io.Writer
+	label  string
+	width  int // 0 — определить по терминалу (не терминал — 100)
 	center bool
 	full   bool
+	color  *bool // nil — автоматика: «писатель — терминал с ANSI?»
+	ascii  bool
+}
+
+// Option — программная настройка одного вызова (Finspect, FinspectType,
+// NewGallery). Опция сильнее одноимённой переменной окружения.
+type Option func(*config)
+
+// WithWriter направляет вывод в w вместо os.Stdout: буфер теста, файл отчёта,
+// пайп. Галерея с таким писателем печатает статикой — TUI живёт только на
+// живом терминале.
+func WithWriter(w io.Writer) Option {
+	return func(c *config) {
+		if w != nil {
+			c.out = w
+		}
+	}
+}
+
+// WithLabel — подпись в заголовке (эквивалент label у Inspect).
+func WithLabel(label string) Option { return func(c *config) { c.label = label } }
+
+// WithWidth — считать экран шириной cols колонок (как EYE_WIDTH).
+func WithWidth(cols int) Option {
+	return func(c *config) {
+		if cols > 0 {
+			c.width = cols
+		}
+	}
+}
+
+// WithColor принудительно включает или выключает ANSI-цвета (как EYE_COLOR).
+func WithColor(on bool) Option { return func(c *config) { c.color = &on } }
+
+// WithASCII — рамки и стрелки чистым ASCII (как EYE_ASCII=1).
+func WithASCII(on bool) Option { return func(c *config) { c.ascii = on } }
+
+// WithFull — не сворачивать длинные регионы (как EYE_FULL=1).
+func WithFull(on bool) Option { return func(c *config) { c.full = on } }
+
+// WithCenter — центрировать блок по ширине экрана (как EYE_CENTER).
+func WithCenter(on bool) Option { return func(c *config) { c.center = on } }
+
+// envLookupBool — булева переменная и признак «задана ли вообще».
+func envLookupBool(name string) (val, ok bool) {
+	switch os.Getenv(name) {
+	case "1", "true", "yes", "on":
+		return true, true
+	case "0", "false", "no", "off":
+		return false, true
+	}
+	return false, false
 }
 
 func envBool(name string, def bool) bool {
-	switch os.Getenv(name) {
-	case "1", "true", "yes", "on":
-		return true
-	case "0", "false", "no", "off":
-		return false
+	if v, ok := envLookupBool(name); ok {
+		return v
 	}
 	return def
 }
@@ -45,27 +104,51 @@ func envInt(name string, def int) int {
 }
 
 // loadConfig — раз за вызов: окружение могло смениться между Inspect'ами.
-func loadConfig() config {
-	// автоцвет = «stdout — терминал» И «терминал готов исполнять ANSI»:
-	// на Windows второе требует включить VT-режим консоли (term.EnableColor
-	// делает это сам); EYE_COLOR=1/0 перекрывает автоматику в обе стороны
-	onTTY := term.IsTerminal(os.Stdout.Fd())
-	text.Color = envBool("EYE_COLOR", onTTY && term.EnableColor())
-	text.ASCII = envBool("EYE_ASCII", false)
-
-	screen := envInt("EYE_WIDTH", 0)
-	if screen == 0 {
-		if w, _, ok := term.Size(); ok {
-			screen = w
-		} else {
-			screen = 100
-		}
-	}
-	return config{
-		width:  screen,
+// Сначала окружение, поверх него опции, а что осталось на автомате —
+// решается по итоговому писателю: цвет и ширина берутся у терминала, буферу
+// достаются чистый текст и 100 колонок.
+func loadConfig(opts ...Option) config {
+	cfg := config{
+		out:    os.Stdout,
+		width:  envInt("EYE_WIDTH", 0),
 		center: envBool("EYE_CENTER", true),
 		full:   envBool("EYE_FULL", false),
+		ascii:  envBool("EYE_ASCII", false),
 	}
+	if v, ok := envLookupBool("EYE_COLOR"); ok {
+		cfg.color = &v
+	}
+	for _, o := range opts {
+		o(&cfg)
+	}
+
+	// автоцвет = «писатель — терминал» И «терминал готов исполнять ANSI»:
+	// на Windows второе требует включить VT-режим консоли (term.EnableColor
+	// делает это сам); WithColor/EYE_COLOR перекрывают автоматику в обе стороны
+	color := false
+	if cfg.color != nil {
+		color = *cfg.color
+	} else if cfg.isTerminal() {
+		color = term.EnableColor()
+	}
+	text.Color = color
+	text.ASCII = cfg.ascii
+
+	if cfg.width == 0 {
+		cfg.width = 100
+		if cfg.isTerminal() {
+			if w, _, ok := term.Size(); ok {
+				cfg.width = w
+			}
+		}
+	}
+	return cfg
+}
+
+// isTerminal — итоговый писатель оказался живым терминалом.
+func (c config) isTerminal() bool {
+	f, ok := c.out.(*os.File)
+	return ok && term.IsTerminal(f.Fd())
 }
 
 // renderOptions — ширина рамки: не шире экрана и не безумно широко.

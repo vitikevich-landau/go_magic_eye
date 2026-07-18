@@ -2,7 +2,6 @@ package eye
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"reflect"
 	"strings"
@@ -14,22 +13,32 @@ import (
 	"github.com/vitikevich-landau/go_magic_eye/internal/tui"
 )
 
+// ErrInterrupted — странствие прервано сигналом (Ctrl-C/SIGTERM). Терминал к
+// моменту возврата из Run уже восстановлен; решение «жить дальше или выйти» —
+// за вызывающим, Око os.Exit не делает:
+//
+//	if errors.Is(err, eye.ErrInterrupted) {
+//		os.Exit(130) // принятый для Unix код «убит Ctrl-C»
+//	}
+var ErrInterrupted = errors.New("странствие прервано сигналом (Ctrl-C/SIGTERM)")
+
 // Explore — СТРАНСТВИЕ: интерактивный обозреватель одного объекта.
 // Эквивалент NewGallery().Add(obj, label...).Run().
-func Explore(obj any, label ...string) {
-	NewGallery().Add(obj, label...).Run()
+func Explore(obj any, label ...string) error {
+	return NewGallery().Add(obj, label...).Run()
 }
 
 // Gallery — несколько корней в одной сессии странствия.
 //
 //	g := eye.NewGallery()
 //	g.Add(&knight, "рыцарь").Add(nums).AddType(eye.TypeOf[Config]())
-//	g.Run() // блокирует до выхода (q/Esc)
+//	err := g.Run() // блокирует до выхода (q/Esc)
 //
 // Контракт: объекты галереи и всё достижимое из них живут, пока идёт Run() —
 // Око смотрит на живую память и копий не делает (кроме значений map).
 type Gallery struct {
 	roots []galleryRoot
+	opts  []Option
 }
 
 type galleryRoot struct {
@@ -38,8 +47,10 @@ type galleryRoot struct {
 	t     reflect.Type // тип без объекта (AddType)
 }
 
-// NewGallery — пустая галерея.
-func NewGallery() *Gallery { return &Gallery{} }
+// NewGallery — пустая галерея. Опции действуют на Run: WithWriter уводит
+// статическую печать и кадры EYE_SCRIPT в свой писатель, остальные With*
+// перекрывают одноимённые переменные окружения.
+func NewGallery(opts ...Option) *Gallery { return &Gallery{opts: opts} }
 
 // Add — живой корень. Маркер eye.TypeOf[T]() добавит «тип без объекта».
 func (g *Gallery) Add(obj any, label ...string) *Gallery {
@@ -58,32 +69,38 @@ func (g *Gallery) AddType(m TypeMarker, label ...string) *Gallery {
 	return g
 }
 
-// Run — странствие. Не-терминал (redirect, CI) или EYE_INTERACTIVE=0 —
-// статическая печать всех корней; EYE_SCRIPT — кадры в stdout по клавишам
-// из строки. Блокирует до выхода (q/Esc).
-func (g *Gallery) Run() {
-	cfg := loadConfig()
+// Run — странствие. Не-терминал (redirect, CI, WithWriter в буфер) или
+// EYE_INTERACTIVE=0 — статическая печать всех корней; EYE_SCRIPT — кадры в
+// писатель по клавишам из строки. Блокирует до выхода (q/Esc).
+//
+// Прерывание сигналом (Ctrl-C/SIGTERM) возвращает ErrInterrupted — код выхода
+// процесса выбирает вызывающий, не библиотека. Если терминал не дался
+// (странная консоль?), Run честно печатает статикой и возвращает исходную
+// ошибку.
+func (g *Gallery) Run() error {
+	cfg := loadConfig(g.opts...)
 	if script := os.Getenv("EYE_SCRIPT"); script != "" {
 		g.runScript(script, cfg)
-		return
+		return nil
 	}
-	interactive := envBool("EYE_INTERACTIVE", true) &&
-		term.IsTerminal(os.Stdout.Fd()) && term.IsTerminal(os.Stdin.Fd())
+	// TUI рисует в stdout — странствие возможно, только когда писатель и есть
+	// stdout-терминал (и stdin терминал: клавиши читать откуда-то надо)
+	interactive := envBool("EYE_INTERACTIVE", true) && cfg.out == os.Stdout &&
+		cfg.isTerminal() && term.IsTerminal(os.Stdin.Fd())
 	if !interactive {
 		g.printAll(cfg)
-		return
+		return nil
 	}
 	app := tui.NewApp(g.session(), os.Getenv("EYE_SNAP_DIR"))
 	if err := app.Run(); err != nil {
 		if errors.Is(err, tui.ErrInterrupted) {
-			// Ctrl-C/SIGTERM: терминал уже восстановлен цельным путём
-			// (без гонок с отрисовкой) — уходим принятым для Unix кодом
-			os.Exit(130)
+			return ErrInterrupted
 		}
-		// терминал не дался (странная консоль?) — честно печатаем статикой
-		fmt.Fprintln(os.Stderr, "eye:", err)
+		// терминал не дался — честно печатаем статикой, ошибку отдаём наверх
 		g.printAll(cfg)
+		return err
 	}
+	return nil
 }
 
 // session — граф странствия из корней галереи.
@@ -137,5 +154,5 @@ func (g *Gallery) runScript(script string, cfg config) {
 	if w > 120 {
 		w = 120
 	}
-	app.RunScript(strings.Fields(script), os.Stdout, w, envInt("EYE_HEIGHT", 40))
+	app.RunScript(strings.Fields(script), cfg.out, w, envInt("EYE_HEIGHT", 40))
 }

@@ -5,14 +5,15 @@
 // interface-значений (itab — «vtable» Go), встраивание структур, память кучи
 // на панелях-спутниках.
 //
-//	eye.Inspect(obj)              // полный осмотр (печать)
+//	eye.Inspect(obj)              // полный осмотр (печать в stdout)
 //	eye.Inspect(&obj, "казна")    // по указателю — оригинал на месте, со своей подписью
 //	eye.InspectType[T]()          // только статика типа (объект не нужен)
+//	eye.Finspect(w, obj, опции…)  // в свой io.Writer; настройки — опциями With*
 //
 //	eye.Explore(&obj)             // СТРАНСТВИЕ: интерактивный TUI-обозреватель
 //	g := eye.NewGallery()         // несколько корней в одной сессии
 //	g.Add(&knight, "рыцарь").Add(nums).AddType(eye.TypeOf[Config]())
-//	g.Run()                       // блокирует до выхода (q/Esc)
+//	err := g.Run()                // блокирует до выхода (q/Esc); Ctrl-C → eye.ErrInterrupted
 //
 // Рефлексия в Go встроена в язык, поэтому — в отличие от C++-предка
 // (github.com/vitikevich-landau/magic_eye) — Оку не нужны макросы-реестры:
@@ -22,7 +23,7 @@ package eye
 
 import (
 	"fmt"
-	"os"
+	"io"
 	"reflect"
 	"strings"
 
@@ -36,16 +37,33 @@ import (
 // Передан указатель — Око смотрит на оригинал по живому адресу, без копий.
 // Передано значение — оно уже упаковано в any: Око честно осматривает коробку
 // интерфейса (и это само по себе первый урок).
+//
+// Настройки — переменными окружения EYE_*; программный вывод — Finspect.
 func Inspect(obj any, label ...string) {
-	cfg := loadConfig()
-	m := model.Of(obj, first(label))
-	printLines(render.Render(m, cfg.renderOptions()), cfg)
+	cfg := loadConfig(WithLabel(first(label)))
+	printLines(render.Render(model.Of(obj, cfg.label), cfg.renderOptions()), cfg)
 }
 
 // InspectType — только статика типа: объект не нужен.
 func InspectType[T any](label ...string) {
-	cfg := loadConfig()
-	m := model.OfType(reflect.TypeOf((*T)(nil)).Elem(), first(label))
+	cfg := loadConfig(WithLabel(first(label)))
+	m := model.OfType(reflect.TypeOf((*T)(nil)).Elem(), cfg.label)
+	printLines(render.Render(m, cfg.renderOptions()), cfg)
+}
+
+// Finspect — как Inspect, но печатает в w: буфер теста, файл отчёта, пайп.
+// Подпись и остальные настройки — опциями (WithLabel, WithColor, WithWidth…);
+// опции сильнее переменных окружения. Автоцвет у не-терминального писателя
+// выключен — в буфер идёт чистый текст.
+func Finspect(w io.Writer, obj any, opts ...Option) {
+	cfg := loadConfig(append([]Option{WithWriter(w)}, opts...)...)
+	printLines(render.Render(model.Of(obj, cfg.label), cfg.renderOptions()), cfg)
+}
+
+// FinspectType — как InspectType, но печатает в w. Настройки — опциями.
+func FinspectType[T any](w io.Writer, opts ...Option) {
+	cfg := loadConfig(append([]Option{WithWriter(w)}, opts...)...)
+	m := model.OfType(reflect.TypeOf((*T)(nil)).Elem(), cfg.label)
 	printLines(render.Render(m, cfg.renderOptions()), cfg)
 }
 
@@ -54,7 +72,9 @@ func TypeOf[T any]() TypeMarker {
 	return TypeMarker{t: reflect.TypeOf((*T)(nil)).Elem()}
 }
 
-// TypeMarker — см. TypeOf.
+// TypeMarker — непрозрачный маркер «тип без объекта»: создаётся TypeOf[T]()
+// и понимается галереей (Add/AddType) — в осмотр попадает паспорт типа без
+// живого значения.
 type TypeMarker struct{ t reflect.Type }
 
 func first(label []string) string {
@@ -84,5 +104,5 @@ func printLines(lines []string, cfg config) {
 		b.WriteString(l)
 		b.WriteString("\n")
 	}
-	fmt.Fprint(os.Stdout, b.String())
+	fmt.Fprint(cfg.out, b.String())
 }
