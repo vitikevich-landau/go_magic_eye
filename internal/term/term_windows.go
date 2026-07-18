@@ -100,16 +100,16 @@ func isTerminal(fd uintptr) bool {
 	return ok
 }
 
-// enableColor: научить stdout ANSI-цветам ДО первой печати (иначе Inspect
-// в старой conhost вывел бы «←[38;5;…m» буквально). VT остаётся включённым —
+// enableColor: научить консоль за fd ANSI-цветам ДО первой печати (иначе
+// Inspect в старой conhost вывел бы «←[38;5;…m» буквально). Именно за fd:
+// у stdout и stderr свои хэндлы со своими режимами. VT остаётся включённым —
 // это штатное состояние современных консолей.
-func enableColor() bool {
-	out := os.Stdout.Fd()
-	mode, ok := getMode(out)
+func enableColor(fd uintptr) bool {
+	mode, ok := getMode(fd)
 	if !ok {
 		return false
 	}
-	return setMode(out, mode|enableProcessedOut|enableVTProcessing)
+	return setMode(fd, mode|enableProcessedOut|enableVTProcessing)
 }
 
 type coord struct{ x, y int16 }
@@ -122,9 +122,9 @@ type consoleInfo struct {
 	maxWinSize coord
 }
 
-func size() (int, int, bool) {
+func size(fd uintptr) (int, int, bool) {
 	var ci consoleInfo
-	r, _, _ := procGetConsoleScreenBuffer.Call(os.Stdout.Fd(), uintptr(unsafe.Pointer(&ci)))
+	r, _, _ := procGetConsoleScreenBuffer.Call(fd, uintptr(unsafe.Pointer(&ci)))
 	if r == 0 {
 		return 0, 0, false
 	}

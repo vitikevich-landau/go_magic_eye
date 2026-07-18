@@ -32,13 +32,13 @@ func isTerminal(fd uintptr) bool {
 }
 
 // Unix-терминалы исполняют ANSI без дополнительных приглашений.
-func enableColor() bool { return true }
+func enableColor(uintptr) bool { return true }
 
 type winsize struct{ rows, cols, x, y uint16 }
 
-func size() (int, int, bool) {
+func size(fd uintptr) (int, int, bool) {
 	var ws winsize
-	_, _, errno := syscall.Syscall(sysIoctl, os.Stdout.Fd(), ioctlWinsz,
+	_, _, errno := syscall.Syscall(sysIoctl, fd, ioctlWinsz,
 		uintptr(unsafe.Pointer(&ws)))
 	if errno != 0 || ws.cols == 0 {
 		return 0, 0, false

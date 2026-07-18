@@ -123,21 +123,23 @@ func loadConfig(opts ...Option) config {
 	}
 
 	// автоцвет = «писатель — терминал» И «терминал готов исполнять ANSI»:
-	// на Windows второе требует включить VT-режим консоли (term.EnableColor
-	// делает это сам); WithColor/EYE_COLOR перекрывают автоматику в обе стороны
+	// на Windows второе требует включить VT-режим именно этого хэндла
+	// (term.EnableColor делает это сам; stdout ≠ stderr — режимы у каждого
+	// свои); WithColor/EYE_COLOR перекрывают автоматику в обе стороны
 	color := false
 	if cfg.color != nil {
 		color = *cfg.color
-	} else if cfg.isTerminal() {
-		color = term.EnableColor()
+	} else if fd, ok := cfg.terminalFd(); ok {
+		color = term.EnableColor(fd)
 	}
 	text.Color = color
 	text.ASCII = cfg.ascii
 
+	// ширина — у того терминала, куда пойдёт вывод (не обязательно stdout)
 	if cfg.width == 0 {
 		cfg.width = 100
-		if cfg.isTerminal() {
-			if w, _, ok := term.Size(); ok {
+		if fd, ok := cfg.terminalFd(); ok {
+			if w, _, sized := term.Size(fd); sized {
 				cfg.width = w
 			}
 		}
@@ -145,10 +147,19 @@ func loadConfig(opts ...Option) config {
 	return cfg
 }
 
+// terminalFd — дескриптор писателя, если тот оказался живым терминалом.
+func (c config) terminalFd() (uintptr, bool) {
+	f, ok := c.out.(*os.File)
+	if !ok || !term.IsTerminal(f.Fd()) {
+		return 0, false
+	}
+	return f.Fd(), true
+}
+
 // isTerminal — итоговый писатель оказался живым терминалом.
 func (c config) isTerminal() bool {
-	f, ok := c.out.(*os.File)
-	return ok && term.IsTerminal(f.Fd())
+	_, ok := c.terminalFd()
+	return ok
 }
 
 // renderOptions — ширина рамки: не шире экрана и не безумно широко.

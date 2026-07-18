@@ -132,7 +132,7 @@ func (a *App) Run() error {
 // кадр по устаревшему большему, строки перенесутся и экран разъедется;
 // про «слишком мало» честно скажет сам Frame.
 func (a *App) resize() {
-	w, h, ok := term.Size()
+	w, h, ok := term.Size(os.Stdout.Fd()) // TUI рисует в stdout
 	if !ok {
 		if a.W == 0 {
 			a.W, a.H = 100, 32
