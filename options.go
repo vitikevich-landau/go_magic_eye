@@ -129,9 +129,16 @@ func loadConfig(opts ...Option) config {
 	// (term.EnableColor делает это сам; stdout ≠ stderr — режимы у каждого
 	// свои); WithColor/EYE_COLOR перекрывают автоматику в обе стороны
 	color := false
-	if cfg.color != nil {
+	fd, onTTY := cfg.terminalFd()
+	switch {
+	case cfg.color != nil:
 		color = *cfg.color
-	} else if fd, ok := cfg.terminalFd(); ok {
+		if color && onTTY {
+			// цвет принудительный, но VT-режим Windows включить всё равно
+			// надо — иначе legacy-conhost напечатает «←[38;5;…m» буквально
+			term.EnableColor(fd)
+		}
+	case onTTY:
 		color = term.EnableColor(fd)
 	}
 	text.Color = color
@@ -140,7 +147,7 @@ func loadConfig(opts ...Option) config {
 	// ширина — у того терминала, куда пойдёт вывод (не обязательно stdout)
 	if cfg.width == 0 {
 		cfg.width = 100
-		if fd, ok := cfg.terminalFd(); ok {
+		if onTTY {
 			if w, _, sized := term.Size(fd); sized {
 				cfg.width = w
 			}
