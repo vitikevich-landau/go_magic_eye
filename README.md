@@ -128,7 +128,12 @@ Ctrl-C и SIGTERM.
   соответствие C++-оригиналу, как расширять;
 - [docs/data_model.md](docs/data_model.md) — все объекты системы и структуры
   данных: `Model`/`Region`/`Iface`/`Satellite`, `Node`/`Session`, `App`,
-  жизненный цикл узла, сквозные инварианты.
+  жизненный цикл узла, сквозные инварианты;
+- [docs/interactive/index.html](docs/interactive/index.html) — **интерактивный
+  гримуар**: страница-двойник TUI с живой картой памяти (hover по байтам),
+  переключаемой анатомией iface/eface/typed-nil, кликабельной картой пакетов
+  и дорожной картой «как написать такое с нуля». Открой локально в браузере
+  (`xdg-open docs/interactive/index.html`) или включи GitHub Pages.
 
 ```
 go_magic_eye/

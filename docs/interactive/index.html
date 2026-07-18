@@ -1,0 +1,342 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>👁 go_magic_eye — интерактивный гримуар</title>
+<style>
+:root{
+  --bg:#101014;--panel:#17171d;--panel2:#1d1d25;--line:#2a2a33;
+  --ink:#d6d6d0;--dim:#8a8a90;--gold:#e8c56a;--blue:#87d7ff;--green:#afd787;
+  --red:#d75f5f;--mag:#d787d7;--addr:#87afd7;--sel:#2c2c3a;
+}
+@media (prefers-color-scheme: light){:root{
+  --bg:#f2f1ec;--panel:#faf9f5;--panel2:#eceae2;--line:#d8d5c9;
+  --ink:#26262b;--dim:#6f6f6c;--gold:#9a7317;--blue:#0f6fa8;--green:#4a7d1f;
+  --red:#b03a3a;--mag:#9a3f9a;--addr:#3d6ea5;--sel:#e4e1d4;
+}}
+:root[data-theme="dark"]{
+  --bg:#101014;--panel:#17171d;--panel2:#1d1d25;--line:#2a2a33;
+  --ink:#d6d6d0;--dim:#8a8a90;--gold:#e8c56a;--blue:#87d7ff;--green:#afd787;
+  --red:#d75f5f;--mag:#d787d7;--addr:#87afd7;--sel:#2c2c3a;
+}
+:root[data-theme="light"]{
+  --bg:#f2f1ec;--panel:#faf9f5;--panel2:#eceae2;--line:#d8d5c9;
+  --ink:#26262b;--dim:#6f6f6c;--gold:#9a7317;--blue:#0f6fa8;--green:#4a7d1f;
+  --red:#b03a3a;--mag:#9a3f9a;--addr:#3d6ea5;--sel:#e4e1d4;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.65 -apple-system,"Segoe UI",Roboto,sans-serif}
+code,pre,.mono{font-family:ui-monospace,"Cascadia Code",Consolas,Menlo,monospace}
+a{color:var(--blue)}
+.bar{display:flex;gap:.6em;align-items:baseline;padding:.55em 1em;
+  border-bottom:1px solid var(--line);background:var(--panel);
+  font-family:ui-monospace,Consolas,monospace;flex-wrap:wrap}
+.bar .eye{color:var(--gold);font-weight:700}
+.bar .crumb{color:var(--dim);font-size:.85em}
+.wrap{display:flex;min-height:calc(100vh - 84px)}
+nav{width:250px;flex:none;border-right:1px solid var(--line);background:var(--panel);
+  padding:.8em 0;font-family:ui-monospace,Consolas,monospace;font-size:.88em}
+nav .ztab{margin:.2em .8em .7em;color:var(--bg);background:var(--gold);
+  padding:.05em .5em;font-weight:700;display:inline-block}
+nav button{display:block;width:100%;text-align:left;background:none;border:0;
+  color:var(--ink);padding:.4em 1em;cursor:pointer;font:inherit;line-height:1.4}
+nav button:hover{background:var(--sel)}
+nav button.on{background:var(--sel);color:var(--gold)}
+nav button .k{color:var(--dim);margin-right:.55em}
+main{flex:1;min-width:0;padding:1.6em 2.2em 4em;max-width:900px}
+section{display:none}section.on{display:block}
+h1{font-family:ui-monospace,Consolas,monospace;font-size:1.5em;color:var(--gold);
+  text-wrap:balance;margin:.2em 0 .6em}
+h2{font-family:ui-monospace,Consolas,monospace;font-size:1.08em;color:var(--gold);
+  margin:1.6em 0 .5em;border-bottom:1px solid var(--line);padding-bottom:.25em}
+p,li{max-width:66ch}
+.note{color:var(--dim);font-size:.92em}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:4px;
+  padding: .9em 1.1em;margin:.8em 0}
+pre{background:var(--panel2);border:1px solid var(--line);border-radius:4px;
+  padding:.8em 1em;overflow-x:auto;font-size:.86em;line-height:1.5}
+kbd{background:var(--panel2);border:1px solid var(--line);border-radius:3px;
+  padding:0 .35em;font-family:ui-monospace,monospace;font-size:.85em}
+.status{position:fixed;left:0;right:0;bottom:0;background:var(--panel);
+  border-top:1px solid var(--line);color:var(--dim);padding:.35em 1em;
+  font:12px ui-monospace,Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.status b{color:var(--green);font-weight:400}
+details{border:1px solid var(--line);border-radius:4px;margin:.5em 0;background:var(--panel)}
+summary{cursor:pointer;padding:.55em .9em;font-family:ui-monospace,monospace;color:var(--blue)}
+summary:hover{background:var(--sel)}
+details[open] summary{border-bottom:1px solid var(--line);color:var(--gold)}
+details .in{padding:.7em 1em}
+table{border-collapse:collapse;font-size:.9em;margin:.6em 0}
+td,th{border:1px solid var(--line);padding:.3em .6em;text-align:left;vertical-align:top}
+th{background:var(--panel2);font-weight:600}
+/* карта памяти */
+.mem{font-family:ui-monospace,Consolas,monospace;font-size:.9em;overflow-x:auto}
+.mrow{display:flex;gap:2px;margin:2px 0;align-items:center}
+.moff{width:5.5em;color:var(--dim);flex:none}
+.mb{width:2.4em;height:1.7em;flex:none;display:flex;align-items:center;
+  justify-content:center;border-radius:2px;cursor:pointer;border:1px solid transparent}
+.mb:hover,.mb.hot{border-color:var(--gold);filter:brightness(1.25)}
+.legend{display:flex;gap:1.2em;flex-wrap:wrap;font-size:.85em;color:var(--dim);margin:.5em 0}
+.legend i{display:inline-block;width:.9em;height:.9em;border-radius:2px;
+  vertical-align:-.1em;margin-right:.35em}
+#mexp{min-height:5.5em}
+#mexp b{color:var(--gold)}
+/* пакеты */
+.pkgs{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.5em;
+  font-family:ui-monospace,monospace;font-size:.88em}
+.pkgs button{background:var(--panel2);border:1px solid var(--line);border-radius:4px;
+  color:var(--blue);padding:.5em;cursor:pointer;font:inherit;text-align:left}
+.pkgs button:hover,.pkgs button.on{border-color:var(--gold);color:var(--gold)}
+/* itab */
+.modes{display:flex;gap:.5em;margin:.6em 0;flex-wrap:wrap}
+.modes button{background:var(--panel2);border:1px solid var(--line);border-radius:4px;
+  color:var(--ink);padding:.35em .8em;cursor:pointer;font:inherit}
+.modes button.on{border-color:var(--mag);color:var(--mag)}
+.itab{font-family:ui-monospace,monospace;font-size:.88em;overflow-x:auto}
+.itab .w{display:inline-block;border:1px solid var(--mag);border-radius:3px;
+  padding:.25em .7em;margin:.15em .3em .15em 0;background:var(--panel2)}
+.roadmap li{margin:.5em 0}
+.roadmap b{color:var(--gold);font-family:ui-monospace,monospace}
+button:focus-visible,summary:focus-visible{outline:2px solid var(--gold);outline-offset:1px}
+@media (max-width:760px){.wrap{flex-direction:column}
+  nav{width:auto;display:flex;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line)}
+  nav .ztab{display:none}nav button{width:auto;white-space:nowrap}}
+@media (prefers-reduced-motion:no-preference){section.on{animation:f .18s ease}
+  @keyframes f{from{opacity:.4}to{opacity:1}}}
+</style>
+
+<div class="bar"><span class="eye">◉ Око мага · гримуар</span>
+<span class="crumb">go_magic_eye — как устроен визуальный инспектор объектов Go</span></div>
+<div class="wrap">
+<nav aria-label="разделы"><span class="ztab">▌ ДЕРЕВО ▐</span>
+<button data-s="s1" class="on"><span class="k">1</span>▸ обзор</button>
+<button data-s="s2"><span class="k">2</span>▸ карта пакетов</button>
+<button data-s="s3"><span class="k">3</span>▸ память вживую</button>
+<button data-s="s4"><span class="k">4</span>▸ интерфейсы и itab</button>
+<button data-s="s5"><span class="k">5</span>▸ структуры данных</button>
+<button data-s="s6"><span class="k">6</span>▸ странствие (TUI)</button>
+<button data-s="s7"><span class="k">7</span>▸ написать с нуля</button>
+<button data-s="s8"><span class="k">8</span>▸ ловушки и границы</button>
+</nav>
+<main>
+
+<section id="s1" class="on">
+<h1>Что такое Око — за 90 секунд</h1>
+<p><b>go_magic_eye</b> — учебная библиотека-«рентген»: она берёт живой объект Go и показывает его так, как его видит машина — байты, смещения, дыры выравнивания, заголовки строк и срезов, таблицы методов интерфейсов. Порт C++-проекта <code>magic_eye</code>, переосмысленный под механику Go.</p>
+<pre>eye.Inspect(&amp;obj)   // статический осмотр: печать «рамки» в терминал
+eye.Explore(&amp;obj)   // странствие: интерактивный TUI-обозреватель
+g := eye.NewGallery(); g.Add(&amp;a).Add(&amp;b).Run()</pre>
+<h2>Конвейер</h2>
+<pre>объект → [reflect+unsafe] → Model (plain-данные) → [render] → строки → печать
+                               └────────→ [nav] дерево → [tui] кадры → терминал</pre>
+<p>Две границы («швы») держат систему простой: <b>модель</b> ничего не знает о рамках и цветах, <b>вид</b> ничего не знает о reflect. Проверяется списком import'ов.</p>
+<h2>Три идеи, на которых всё стоит</h2>
+<div class="card"><b style="color:var(--blue)">1. Рефлексия видит всё.</b> <code>reflect</code> отдаёт имена, типы и offset'ы даже неэкспортированных полей; значение приватного поля читается легальным приёмом <code>reflect.NewAt</code> по живому адресу. Макросы-реестры C++-предка не нужны — это главный урок порта.</div>
+<div class="card"><b style="color:var(--mag)">2. «Vtable» Go живёт в значении интерфейса.</b> У объекта нет vptr. Пара слов (itab, data) — вся полиморфная машинерия; Око читает живой itab и называет методы через <code>runtime.FuncForPC</code> (§4).</div>
+<div class="card"><b style="color:var(--green)">3. Ленивость и честность.</b> Дерево странствия строит узел только при раскрытии; всё, что нельзя показать корректно (nil, стёртый тип, значения map), называется по имени, а не замалчивается.</div>
+</section>
+
+<section id="s2">
+<h1>Карта пакетов</h1>
+<p class="note">Клик по пакету — описание. Стрелки = «кто кого импортирует».</p>
+<pre>eye (корень) ──→ model ←── render ←─┐
+   │  └────────→ nav ──→ model      ├── tui ──→ term
+   └───────────→ tui ───────────────┘     └──→ text ←── (все)</pre>
+<div class="pkgs" id="pkgs"></div>
+<div class="card" id="pkginfo">Выбери пакет.</div>
+</section>
+
+<section id="s3">
+<h1>Память вживую</h1>
+<p>Так Око видит структуру. Наведи (или тапни) на байты:</p>
+<pre>type Knight struct {
+    hp     int32   // приватное — Оку всё равно
+    speed  int32
+    armor  int16
+    banner string
+}</pre>
+<div class="legend"><span><i style="background:var(--blue)"></i>поле</span>
+<span><i style="background:var(--red)"></i>padding-дыра</span>
+<span><i style="background:var(--mag)"></i>слова заголовка</span></div>
+<div class="mem" id="mem"></div>
+<div class="card" id="mexp"><b>Наведи на байт.</b><br><span class="note">Каждый байт знает, зачем он: поле, дыра со своей причиной или слово заголовка строки.</span></div>
+<h2>Что здесь учат</h2>
+<ul>
+<li><b>Выравнивание</b>: int16 после двух int32 оставляет дыру в 6 байт — string требует адрес, кратный 8. Go поля <i>не переставляет</i>: раскладка в руках автора.</li>
+<li><b>little-endian</b>: 100 = <code>64 00 00 00</code> — младший байт первым.</li>
+<li><b>Заголовки</b>: string — это 2 слова (data+len); сами буквы живут вне объекта и показываются «спутником».</li>
+</ul>
+</section>
+
+<section id="s4">
+<h1>Интерфейсы: два слова и таблица</h1>
+<div class="modes" id="modes">
+<button data-m="0" class="on">iface: Speaker = &amp;Knight{}</button>
+<button data-m="1">eface: any = 42</button>
+<button data-m="2">ловушка: typed nil</button></div>
+<div class="itab card" id="itabbox"></div>
+<h2>Как Око читает itab</h2>
+<pre>+0  inter *interfacetype   какой интерфейс
++8  _type *_type           какой динамический тип
++16 hash  uint32           копия хеша типа (ускоряет type switch)
++24 fun[0] uintptr ──→ runtime.FuncForPC → "main.(*Knight).Speak"
++32 fun[1] uintptr ──→ ...   (слоты отсортированы по имени метода)</pre>
+<p class="note">Раскладка — внутренность gc-рантайма (стабильна go1.21+, но спецификация её не обещает). Око читает слоты только на 64-битных платформах и подписывает происхождение знания; имена методов из reflect верны всегда. Отдельная тонкость — <b>direct-iface</b>: для <code>*T</code>, map, chan, func и даже <code>struct{p *T}</code> слово data — само значение, а не адрес.</p>
+</section>
+
+<section id="s5">
+<h1>Структуры данных</h1>
+<p class="note">Полные таблицы полей — в <code>docs/data_model.md</code>; здесь — роли и связи.</p>
+<details open><summary>model.Model — всё, что Око увидело</summary><div class="in">
+<p>Корень модели: <code>Passport</code> (статика типа), <code>Regions</code> (карта памяти), <code>Embeds</code> (встраивания), <code>Ifaces</code> (анатомия интерфейсов), <code>Sats</code> (память вне объекта), <code>Bytes</code> — <b>живые</b> байты через <code>unsafe.Slice</code>, не копия. Создатели: <code>Of / OfValue / OfType</code>. Единственный потребитель unsafe-знания.</p></div></details>
+<details><summary>model.Region — кусок памяти с выноской</summary><div class="in">
+<p><code>Kind</code> (поле/дыра/слово) + <code>Offset,Size</code> + готовые строки <code>Value</code>/<code>Note</code>/<code>From</code>. Инварианты: отсортированы, не пересекаются, каждая дыра несёт причину. Байты регион не хранит — рендер режет <code>Model.Bytes</code>.</p></div></details>
+<details><summary>model.Iface / Method — анатомия interface-значения</summary><div class="in">
+<p>Два сырых слова (<code>TabAddr/DataAddr</code>), динамический тип, слоты (<code>Name</code> из reflect, <code>PC</code> из живого itab, <code>Func</code> из FuncForPC), флаг <code>TypedNil</code>.</p></div></details>
+<details><summary>nav.Node / nav.Session — граф странствия</summary><div class="in">
+<p>Узел держит <b>живой</b> <code>reflect.Value</code>, ленивых детей (<code>Kids()</code> строит один раз), отказ <code>Refusal</code>, ссылку-цикл <code>Cycle</code>, пометку <code>Copied</code>. Session — плоский срез видимых узлов (дерево = список DFS по раскрытым), курсор, история прыжков и карта <code>seen[{адрес,тип}]</code>, превращающая повторный адрес в узел ⟲.</p></div></details>
+<details><summary>tui.App / Decoder — экран и клавиши</summary><div class="in">
+<p>Decoder — конечный автомат: рваные байты → клавиши (CSI/SS3/UTF-8; одинокий ESC дозревает по таймауту Flush). App — состояние кадра: фокус зон, панель (m/p/v/x), прокрутки, поиск, снимки; кадр перерисовывается только при изменениях, построчным диффом, в «синхронизированном выводе» (DECSET 2026).</p></div></details>
+<details><summary>render / text — вид и буквы</summary><div class="in">
+<p>render превращает Model в <code>[]string</code> с рамками (панели: всё/память/паспорт/интерфейсы/hex). text — единственная мера ширины (<code>VisWidth</code> учитывает ANSI и широкие руны), строитель <code>Line</code>, палитра и ASCII-fallback (<code>Rune("▸",">")</code>).</p></div></details>
+<h2>Взаимодействие за один кадр TUI</h2>
+<pre>клавиша → Decoder → App.Handle → Session (курсор/раскрытие)
+       → Node.Detail() [кэш] → model.OfValue → render.RenderPanel
+       → App.Frame() (зоны) → дифф-draw → терминал</pre>
+</section>
+
+<section id="s6">
+<h1>Странствие: цикл без горутин</h1>
+<pre>for {
+    if dirty { draw(дифф) }
+    n := term.ReadInput(≤100 мс)   // termios VTIME · WaitForSingleObject
+    if n==0 { Flush(ESC); resize() }
+    for k := range keys { dirty = Handle(k) }
+}</pre>
+<ul>
+<li><b>Почему без горутин-читателей:</b> застрявший Read крал бы stdin у программы после выхода. Таймаут делает цикл живым: ESC дозревает, размер окна опрашивается.</li>
+<li><b>Восстановление терминала — при любом исходе:</b> нормальный выход — defer; Ctrl-C — сигнальная горутина лишь ставит флаг, цикл выходит сам и defer'ы отрабатывают в одном потоке (никаких гонок с draw).</li>
+<li><b>Windows:</b> та же логика; консоль переводится в VT-режим, очередь событий дренируется от фокусов/модификаторов, ввод — UTF-8.</li></ul>
+<h2>Клавиши</h2>
+<table><tr><th>клавиши</th><th>действие</th></tr>
+<tr><td><kbd>↑↓</kbd> <kbd>k/j</kbd></td><td>курсор по дереву</td></tr>
+<tr><td><kbd>→</kbd>/<kbd>Enter</kbd></td><td>раскрыть · перейти по указателю</td></tr>
+<tr><td><kbd>←</kbd></td><td>свернуть · из деталей — фокус в дерево</td></tr>
+<tr><td><kbd>Tab</kbd></td><td>фокус зон (плашка ▌ДЕРЕВО▐/▌ДЕТАЛИ▐ показывает где ты)</td></tr>
+<tr><td><kbd>m p v x</kbd></td><td>панель: память/паспорт/интерфейсы/hex</td></tr>
+<tr><td><kbd>b</kbd> <kbd>/</kbd> <kbd>n N</kbd> <kbd>1..9</kbd></td><td>назад · поиск · корни галереи</td></tr>
+<tr><td><kbd>s</kbd> / <kbd>S</kbd></td><td>снимок: точная копия экрана / документ</td></tr>
+<tr><td><kbd>f e c</kbd> <kbd>?</kbd> <kbd>q</kbd></td><td>развернуть · раскрыть ветку · свернуть всё · помощь · выход</td></tr></table>
+</section>
+
+<section id="s7">
+<h1>Написать такое с нуля: дорожная карта</h1>
+<p>Этапы — реальная последовательность: каждый работает сам по себе и становится фундаментом следующего.</p>
+<ol class="roadmap">
+<li><b>M0 · паспорт.</b> <code>unsafe.Sizeof/Alignof</code>, <code>reflect.TypeOf</code>, kind. Понять: тип — это метаданные, которые существуют в рантайме.</li>
+<li><b>M1 · hex-дамп.</b> <code>unsafe.Slice((*byte)(ptr), size)</code> поверх любого объекта. Понять: адресуемость, «объект = байты», little-endian.</li>
+<li><b>M2 · поля и дыры.</b> Обход <code>NumField/Field(i).Offset</code>, вычисление разрывов, причина каждой дыры = выравнивание следующего поля. Понять: раскладку структур и почему размер кратен align.</li>
+<li><b>M3 · приватное.</b> flagRO и приём <code>reflect.NewAt(t, unsafe.Pointer(v.UnsafeAddr())).Elem()</code>. Понять: чем запрет reflect отличается от запрета памяти.</li>
+<li><b>M4 · заголовки.</b> string/slice/map/chan/func как слова; <code>unsafe.StringData</code>, cap-хвост, спутники. Понять: значение ≠ данные, указатели повсюду.</li>
+<li><b>M5 · itab.</b> Два слова интерфейса, раскладка <code>internal/abi.ITab</code>, <code>runtime.FuncForPC</code>, direct-iface. Понять: как type switch и вызов метода работают под капотом.</li>
+<li><b>M6 · терминал.</b> termios (ECHO/ICANON/VMIN/VTIME) и консоль Windows (режимы, VT); ANSI: цвета, alt-screen, позиционирование; декодер ESC-последовательностей. Понять: терминал — это байтовый протокол двух направлений.</li>
+<li><b>M7 · странствие.</b> Ленивое дерево поверх reflect.Value, плоский список видимых узлов, циклы по (адрес,тип), кадр-дифф. Понять: UI = чистая функция от состояния.</li></ol>
+<h2>Что читать параллельно</h2>
+<ul><li>пакеты <code>reflect</code> и <code>unsafe</code> (документация — часть контракта!),</li>
+<li>Russ Cox, «Go Data Structures» и «Go Data Structures: Interfaces»,</li>
+<li>исходники рантайма: <code>runtime/runtime2.go</code> (iface/eface), <code>internal/abi</code>,</li>
+<li>man-страницы <code>termios(3)</code>, справочник ANSI/VT100, wincon.h.</li></ul>
+</section>
+
+<section id="s8">
+<h1>Ловушки и честные границы</h1>
+<table>
+<tr><th>ситуация</th><th>что делает Око</th></tr>
+<tr><td>значения map</td><td>не адресуемы по правилам языка (бакеты переезжают) → честная копия с пометкой</td></tr>
+<tr><td><code>unsafe.Pointer</code>, <code>uintptr</code></td><td>тип стёрт / GC не охраняет → показывается слово, перехода нет</td></tr>
+<tr><td>typed nil</td><td>интерфейс ≠ nil при nil-указателе внутри → подсвечено как ловушка</td></tr>
+<tr><td>раскладка itab, hmap</td><td>внутренности рантайма: itab читается с подписью о происхождении, hmap — не читается вовсе</td></tr>
+<tr><td><code>Inspect(x)</code> по значению</td><td>осматривается коробка интерфейса (копия) — и это честно сказано; оригинал — через <code>&amp;x</code></td></tr>
+<tr><td>жизнь объектов</td><td>байты и спутники — живая память: объекты галереи должны жить, пока идёт Run()</td></tr>
+</table>
+<h2>Проверено машинами и людьми</h2>
+<p class="note">CI: Linux + Windows + macOS (+кросс-сборка 386/freebsd), тесты модели, декодера, снапшот-тесты TUI, регрессы на переполнение строк, ASCII-режим и точность снимков. Многоагентное ревью: 22 находки, все закрыты.</p>
+</section>
+</main></div>
+<div class="status" id="st"><b>1..8</b> разделы · это страница-двойник TUI: слева дерево, справа Гримуар · подробности: docs/*.md в репозитории</div>
+
+<script>
+(function(){
+"use strict";
+var secs=document.querySelectorAll("main section"),
+    btns=document.querySelectorAll("nav button");
+function go(id){secs.forEach(function(s){s.classList.toggle("on",s.id===id)});
+  btns.forEach(function(b){b.classList.toggle("on",b.dataset.s===id)});
+  document.querySelector("main").scrollTop=0;window.scrollTo(0,0)}
+btns.forEach(function(b){b.addEventListener("click",function(){go(b.dataset.s)})});
+document.addEventListener("keydown",function(e){
+  if(e.target.tagName==="INPUT")return;
+  var n=+e.key;if(n>=1&&n<=secs.length)go("s"+n)});
+
+/* карта памяти Knight */
+var regs=[
+ {n:"hp",o:0,s:4,c:"--blue",v:"int32 = 100 (0x64)",note:"приватное поле — reflect видит имя и offset, unsafe читает значение по адресу. Байты 64 00 00 00: младший вперёд (little-endian)."},
+ {n:"speed",o:4,s:4,c:"--blue",v:"int32 = 7",note:"выравнивание 4: легло вплотную к hp, дыры нет."},
+ {n:"armor",o:8,s:2,c:"--blue",v:"int16 = 30 (0x1e)",note:"двухбайтовое поле — начало нового 8-байтового слова."},
+ {n:"padding",o:10,s:6,c:"--red",v:"дыра 6 Б",note:"причина: следующее поле banner (string) требует адрес, кратный 8. Перестановка полей по убыванию выравнивания убрала бы дыру — Go сам поля не двигает."},
+ {n:"banner.data",o:16,s:8,c:"--mag",v:"*byte → буфер",note:"первое слово заголовка строки: указатель на байты. Сами буквы — вне объекта (у литералов — .rodata, это не куча)."},
+ {n:"banner.len",o:24,s:8,c:"--mag",v:"len = 7",note:"второе слово заголовка: длина. string = (data, len), всегда 16 байт на 64-битной платформе, сколько бы ни весил текст."}
+];
+var bytes=["64","00","00","00","07","00","00","00","1e","00","00","00","00","00","00","00",
+           "e0","3f","52","00","00","00","00","00","07","00","00","00","00","00","00","00"];
+var mem=document.getElementById("mem"),exp=document.getElementById("mexp");
+function regOf(i){for(var r of regs)if(i>=r.o&&i<r.o+r.s)return r;return null}
+for(var row=0;row<4;row++){
+  var d=document.createElement("div");d.className="mrow";
+  var off=document.createElement("span");off.className="moff";
+  off.textContent="+0x"+(row*8).toString(16).padStart(4,"0");d.appendChild(off);
+  for(var c=0;c<8;c++){
+    (function(i){var r=regOf(i),b=document.createElement("span");
+    b.className="mb";b.textContent=bytes[i];b.tabIndex=0;
+    b.style.background="color-mix(in srgb, var("+r.c+") 32%, var(--panel2))";
+    b.style.color="var("+r.c+")";
+    function show(){document.querySelectorAll(".mb").forEach(function(x){x.classList.remove("hot")});
+      document.querySelectorAll(".mb").forEach(function(x,j){var rr=regOf(j);if(rr===r)x.classList.add("hot")});
+      exp.innerHTML="<b>"+r.n+"</b> · offset +"+r.o+", "+r.s+" Б · <span class='mono'>"+r.v+
+        "</span><br><span class='note'>"+r.note+"</span>"}
+    b.addEventListener("mouseenter",show);b.addEventListener("focus",show);b.addEventListener("click",show);
+    d.appendChild(b)})(row*8+c);
+  }
+  mem.appendChild(d);
+}
+
+/* пакеты */
+var pk={
+ "eye":"Публичный API в корне модуля: Inspect / InspectType[T] / Explore / Gallery + разбор EYE_*-переменных. Тонкий: вся механика в internal/.",
+ "internal/model":"Единственный знаток reflect+unsafe. Превращает объект в plain-структуры (Model, Region, Iface, Satellite). Шов №1: наружу — только данные.",
+ "internal/render":"Вид: Model → []string с рамками, кирпичами, hex и выносками. Не импортирует reflect — граница держится компилятором.",
+ "internal/nav":"Ленивое дерево странствия поверх живых reflect.Value: узлы, отказы, циклы ⟲, страницы по 100, поиск, история.",
+ "internal/tui":"Ядро интерфейса: декодер клавиш (КА), кадр из зон, цикл событий, панели, снимки, EYE_SCRIPT-режим для CI.",
+ "internal/term":"Единственный платформозависимый пакет: termios (Linux/macOS), консоль kernel32+VT (Windows), честная деградация на прочих ОС.",
+ "internal/text":"Буквы: экранная ширина с учётом ANSI и широких рун, строитель Line, палитра, ASCII-fallback каждого глифа."};
+var pl=document.getElementById("pkgs"),pi=document.getElementById("pkginfo");
+Object.keys(pk).forEach(function(k){var b=document.createElement("button");
+  b.textContent=k;b.addEventListener("click",function(){
+  pl.querySelectorAll("button").forEach(function(x){x.classList.remove("on")});
+  b.classList.add("on");pi.innerHTML="<b class='mono'>"+k+"</b><br>"+pk[k]});pl.appendChild(b)});
+
+/* itab-режимы */
+var modes=[
+ '<div><span class="w">[0] tab → itab</span><span class="w">[1] data → &Knight</span></div>'+
+ '<pre>itab: hash 0xf9cb7969\\nслот 0: Speak  → main.(*Knight).Speak\\nслот 1: Volume → main.(*Knight).Volume</pre>'+
+ '<p class="note">Непустой интерфейс: первое слово — itab (интерфейс+тип+методы). На каждую пару (тип, интерфейс) рантайм строит СВОЙ itab — у одного объекта их может быть много, а data всегда указывает на объект целиком.</p>',
+ '<div><span class="w">[0] *_type → int</span><span class="w">[1] data → коробка 42</span></div>'+
+ '<p class="note">Пустой интерфейс (any): методов нет — вместо itab голое описание типа. 42 упаковано в коробку, data — её адрес. Вот почему Inspect(x) по значению видит копию: упаковка в any уже скопировала.</p>',
+ '<div><span class="w">[0] tab → itab(*Knight)</span><span class="w" style="border-color:var(--red);color:var(--red)">[1] data = nil</span></div>'+
+ '<p class="note">Классика: var k *Knight = nil; var s Speaker = k. Слово типа заполнено → s != nil, хотя внутри пустой указатель. Так рождается «err != nil, а ошибки нет». Око подсвечивает это как ловушку.</p>'];
+var mb=document.querySelectorAll("#modes button"),ib=document.getElementById("itabbox");
+function setm(i){ib.innerHTML=modes[i].replace(/\\n/g,"\n");
+  mb.forEach(function(b,j){b.classList.toggle("on",j===i)})}
+mb.forEach(function(b){b.addEventListener("click",function(){setm(+b.dataset.m)})});
+setm(0);
+})();
+</script>
