@@ -125,6 +125,15 @@ func byteRow(m *model.Model, r *model.Region, row int, lay memLayout) string {
 		}
 		l.Sp(2)
 	}
+	// hex и ascii красятся по СОРТУ региона: кирпичи на узкой ширине
+	// отваливаются, а смысл «это дыра, не данные» должен пережить их
+	hexStyle, ascStyle := text.CHex, text.CAscii
+	switch r.Kind {
+	case model.RPadding:
+		hexStyle, ascStyle = text.CPad, text.CPad
+	case model.RWord:
+		hexStyle, ascStyle = text.CItab, text.CItab
+	}
 	var asc strings.Builder
 	for c := uintptr(0); c < bytesPerRow; c++ {
 		i := base + c
@@ -134,7 +143,7 @@ func byteRow(m *model.Model, r *model.Region, row int, lay memLayout) string {
 			continue
 		}
 		if m.HasValue && int(i) < len(m.Bytes) {
-			l.Add(text.CHex, text.HexByte(m.Bytes[i])+" ")
+			l.Add(hexStyle, text.HexByte(m.Bytes[i])+" ")
 			asc.WriteString(text.PrintableASCII(m.Bytes[i]))
 		} else {
 			l.Add(text.CNote, text.Rune("·· ", ".. "))
@@ -143,7 +152,7 @@ func byteRow(m *model.Model, r *model.Region, row int, lay memLayout) string {
 	}
 	l.Sp(1)
 	if lay.ascii {
-		l.Add(text.CAscii, asc.String())
+		l.Add(ascStyle, asc.String())
 		l.Sp(2)
 	}
 	return l.String()
@@ -185,10 +194,18 @@ func callout(r *model.Region, callW int) []string {
 	l.Add(text.CName, r.Name)
 	l.Add(text.CFrame, " : ")
 	l.Add(text.CType, r.TypeName)
-	if r.Value != "" {
+	switch {
+	case r.Value == "":
+		out = append(out, l.String())
+	case l.W()+3+text.VisWidth(r.Value) <= callW:
 		l.Add(text.CFrame, " = ").Add(text.CVal, r.Value)
+		out = append(out, l.String())
+	default:
+		// значение не влезает в строку — переносим, а не обрезаем: рамка
+		// резала бы именно значение, самое ценное в выноске
+		out = append(out, l.String())
+		out = append(out, wrapAt(2, "= ", r.Value, callW, text.CVal)...)
 	}
-	out = append(out, l.String())
 	if r.Note != "" {
 		out = append(out, wrapAt(2, text.Rune("↳ ", "-> "), r.Note, callW, text.CNote)...)
 	}

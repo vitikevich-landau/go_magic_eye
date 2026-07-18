@@ -55,6 +55,29 @@ func TestEnvColorForcesANSI(t *testing.T) {
 	}
 }
 
+// EYE_COLOR задан явно — он сильнее общего NO_COLOR (конкретное бьёт общее).
+func TestEnvColorBeatsNoColor(t *testing.T) {
+	t.Setenv("EYE_COLOR", "1")
+	t.Setenv("NO_COLOR", "1")
+	var b strings.Builder
+	eye.Finspect(&b, 42)
+	if !strings.Contains(b.String(), "\x1b[") {
+		t.Error("явный EYE_COLOR=1 должен перекрывать NO_COLOR")
+	}
+}
+
+// Значение в выноске переносится, а не обрезается рамкой: хвост («len 14»)
+// обязан дожить до вывода даже на узком экране.
+func TestNarrowWidthKeepsValueTail(t *testing.T) {
+	type banner struct{ Motto string }
+	bn := banner{Motto: "Semper fidelis"}
+	var b strings.Builder
+	eye.Finspect(&b, &bn, eye.WithWidth(60), eye.WithColor(false), eye.WithCenter(false))
+	if !strings.Contains(b.String(), "len 14") {
+		t.Errorf("хвост значения строки потерян на узкой ширине:\n%s", b.String())
+	}
+}
+
 func TestWithWidthBeatsEnv(t *testing.T) {
 	t.Setenv("EYE_WIDTH", "100")
 	var b strings.Builder

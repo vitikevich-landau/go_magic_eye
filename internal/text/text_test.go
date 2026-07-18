@@ -40,6 +40,29 @@ func TestClipVis(t *testing.T) {
 	}
 }
 
+func TestClipVisMid(t *testing.T) {
+	s := "Cache[map[string]int]"
+	c := ClipVisMid(s, 12)
+	if VisWidth(c) > 12 {
+		t.Fatalf("обрезка середины шире лимита: %d %q", VisWidth(c), c)
+	}
+	if !strings.HasPrefix(c, "Cache") || !strings.HasSuffix(c, "]int]") {
+		t.Fatalf("должны выжить начало И хвост: %q", c)
+	}
+	if !strings.Contains(c, "…") {
+		t.Fatalf("нет следа обрезки: %q", c)
+	}
+	if got := ClipVisMid("короткая", 20); got != "короткая" {
+		t.Fatalf("короткое не должно меняться: %q", got)
+	}
+	// строка с ANSI честно уходит в ClipVis (середину ей не режем)
+	colored := CWarn + "опасность повсюду вокруг нас" + CReset
+	cc := ClipVisMid(colored, 10)
+	if VisWidth(cc) > 10 {
+		t.Fatalf("цветная обрезка шире лимита: %d", VisWidth(cc))
+	}
+}
+
 func TestLineBuilder(t *testing.T) {
 	old := Color
 	Color = true

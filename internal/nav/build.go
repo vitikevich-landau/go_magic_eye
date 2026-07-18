@@ -82,13 +82,38 @@ func (s *Session) ptrKids(n *Node, v reflect.Value) []*Node {
 	target := v.Elem()
 	key := seenKey{addr: v.Pointer(), t: target.Type()}
 	if prev, ok := s.seen[key]; ok && prev != n {
-		c := s.child(n, "уже показан", target.Type().String()+" · Enter — прыжок", reflect.Value{})
-		c.Cycle = prev
-		return []*Node{c}
+		return []*Node{s.linkNode(n, prev, target.Type().String())}
 	}
 	c := s.child(n, text.Rune("➤", "->")+" цель "+addrLabel(target), fmtSub(target), target)
 	s.remember(c)
 	return []*Node{c}
+}
+
+// linkNode — узел-ссылка на уже показанный оригинал. Два честно разных
+// случая: оригинал — предок этого узла (настоящий цикл ⟲: раскрытие шло бы
+// по кругу вечно) или оригинал живёт в другой ветке (разделяемая ссылка ≡ —
+// второй путь к тому же объекту, ромб/DAG). Смешивать их — семантическая
+// ложь: не всякий повтор адреса означает зацикленность.
+func (s *Session) linkNode(n, prev *Node, typeName string) *Node {
+	shared := !hasAncestor(n, prev)
+	sub := typeName + " · цикл: Enter — к предку"
+	if shared {
+		sub = typeName + " · разделяемая ссылка: Enter — к оригиналу"
+	}
+	c := s.child(n, "уже показан", sub, reflect.Value{})
+	c.Cycle = prev
+	c.Shared = shared
+	return c
+}
+
+// hasAncestor — есть ли anc среди предков n (включая сам n).
+func hasAncestor(n, anc *Node) bool {
+	for p := n; p != nil; p = p.Parent {
+		if p == anc {
+			return true
+		}
+	}
+	return false
 }
 
 // ifaceKids — динамическое значение интерфейса.
@@ -107,9 +132,7 @@ func (s *Session) ifaceKids(n *Node, v reflect.Value) []*Node {
 	if dyn.CanAddr() {
 		key := seenKey{addr: dyn.UnsafeAddr(), t: dyn.Type()}
 		if prev, seen := s.seen[key]; seen {
-			c := s.child(n, "уже показан", dyn.Type().String()+" · Enter — прыжок", reflect.Value{})
-			c.Cycle = prev
-			return []*Node{c}
+			return []*Node{s.linkNode(n, prev, dyn.Type().String())}
 		}
 	}
 	c := s.child(n, text.Rune("◈", "*")+" динамика: "+dyn.Type().String(), how, dyn)

@@ -31,10 +31,11 @@ type App struct {
 	query     []rune
 	lastQuery string
 
-	status  string
-	help    bool
-	snapN   int
-	snapDir string
+	status   string
+	help     bool
+	escArmed bool // предыдущая клавиша была Esc в «чистом» состоянии
+	snapN    int
+	snapDir  string
 
 	prev  []string // последний нарисованный кадр (для построчного диффа)
 	dirty bool     // кадр требует перерисовки
@@ -153,6 +154,8 @@ func (a *App) Handle(k Key) bool {
 		return a.handleSearch(k)
 	}
 	a.status = "" // сообщение прошлой клавиши погасло; обработчик поставит новое
+	wasArmed := a.escArmed
+	a.escArmed = false // любая клавиша, кроме второго Esc подряд, снимает взвод
 	if a.help {
 		// пока открыт свиток помощи, клавиши только закрывают его
 		if k.Type == KEsc || k.Type == KF1 || k.Type == KCtrlC ||
@@ -164,8 +167,10 @@ func (a *App) Handle(k Key) bool {
 	switch k.Type {
 	case KIgnore:
 		return false // нераспознанная последовательность — не действие
-	case KCtrlC, KEsc:
+	case KCtrlC:
 		return true
+	case KEsc:
+		return a.escStep(wasArmed)
 	case KUp:
 		a.up(1)
 	case KDown:
@@ -246,6 +251,28 @@ func (a *App) rune(r rune) bool {
 	return false
 }
 
+// escStep — Esc «шагает наружу» по слою за нажатие: панель → фокус → и лишь
+// двойной Esc подряд выходит (q выходит сразу — для тех, кто знает, что
+// делает). Раньше Esc убивал странствие мгновенно — а Alt+клавиша
+// декодируется как одинокий Esc, и случайная Alt-комбинация теряла всё
+// состояние: раскрытые ветки, историю, позицию.
+func (a *App) escStep(armed bool) bool {
+	switch {
+	case a.panel != render.PanelAll:
+		a.panel = render.PanelAll
+		a.detTop = 0
+		a.status = "панель: всё"
+	case a.focus == 1:
+		a.focus = 0
+	case armed:
+		return true
+	default:
+		a.escArmed = true
+		a.status = "Esc ещё раз — выход (q — сразу)"
+	}
+	return false
+}
+
 func onOff(what string, on bool) string {
 	if on {
 		return what + ": ВКЛ"
@@ -313,7 +340,11 @@ func (a *App) enter() {
 		return
 	}
 	if n.Cycle != nil {
-		a.status = text.Rune("⟲", "@") + " прыжок к уже показанному узлу"
+		if n.Shared {
+			a.status = text.Rune("≡", "&") + " разделяемая ссылка: прыжок к оригиналу (b — назад)"
+		} else {
+			a.status = text.Rune("⟲", "@") + " цикл: прыжок к предку (b — назад)"
+		}
 		a.S.Enter()
 		a.detTop = 0
 		return
@@ -440,6 +471,7 @@ func (a *App) snapshotDoc() {
 	}
 	if cur := a.S.Current(); cur != nil {
 		section("детали: " + cur.Label + " · панель: " + panelName(a.panel))
+		line("путь: " + strings.Join(cur.Path(), text.Rune(" › ", " > ")))
 		det := render.RenderPanel(cur.Detail(), render.Options{Width: snapWidth, Full: a.full}, a.panel)
 		for _, l := range det {
 			line(l)

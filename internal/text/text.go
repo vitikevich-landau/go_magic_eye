@@ -95,6 +95,45 @@ func ClipVis(s string, max int) string {
 	return b.String()
 }
 
+// ClipVisMid обрезает СЕРЕДИНУ строки до max экранных колонок: «нача…онец».
+// Хвост ценен не меньше начала: у дженерика он различает инстанциации
+// (Cache[…]int]), у имени функции хранит имя метода. Строки с ANSI-кодами
+// не поддерживаются — такие честно уходят в ClipVis (разрезать раскрашенную
+// строку пополам, не порвав escape-последовательности, дороже, чем полезно).
+func ClipVisMid(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	if VisWidth(s) <= max {
+		return s
+	}
+	if strings.Contains(s, "\x1b") {
+		return ClipVis(s, max)
+	}
+	dots := Rune("…", "~")
+	budget := max - VisWidth(dots)
+	if budget < 2 {
+		return ClipVis(s, max)
+	}
+	head := (budget + 1) / 2
+	tail := budget - head
+	r := []rune(s)
+	var b strings.Builder
+	w, i := 0, 0
+	for ; i < len(r) && w+RuneWidth(r[i]) <= head; i++ {
+		b.WriteRune(r[i])
+		w += RuneWidth(r[i])
+	}
+	w, j := 0, len(r)
+	for j > i && w+RuneWidth(r[j-1]) <= tail {
+		j--
+		w += RuneWidth(r[j])
+	}
+	b.WriteString(dots)
+	b.WriteString(string(r[j:]))
+	return b.String()
+}
+
 // PadVis дополняет строку пробелами справа до w экранных колонок.
 func PadVis(s string, w int) string {
 	d := w - VisWidth(s)

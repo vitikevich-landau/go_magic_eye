@@ -28,6 +28,10 @@ import (
 //	EYE_HEIGHT=N       высота кадра в EYE_SCRIPT-режиме (по умолчанию 40)
 //	EYE_ASCII=1        рамки и стрелки — чистый ASCII
 //	EYE_SNAP_DIR=…     каталог для снимков экрана клавишей s
+//
+// Кроме своих переменных Око уважает общепринятые сигналы: NO_COLOR
+// (непустое значение — цвет выкл) и TERM=dumb; явный EYE_COLOR их
+// перекрывает.
 
 type config struct {
 	out    io.Writer
@@ -127,7 +131,12 @@ func loadConfig(opts ...Option) config {
 	// автоцвет = «писатель — терминал» И «терминал готов исполнять ANSI»:
 	// на Windows второе требует включить VT-режим именно этого хэндла
 	// (term.EnableColor делает это сам; stdout ≠ stderr — режимы у каждого
-	// свои); WithColor/EYE_COLOR перекрывают автоматику в обе стороны
+	// свои); WithColor/EYE_COLOR перекрывают автоматику в обе стороны.
+	// Ниже автоматики, но выше «просто tty» стоят общепринятые сигналы
+	// экосистемы: NO_COLOR (https://no-color.org — непустое значение
+	// выключает цвет; ставят его в том числе люди с чувствительностью к
+	// цвету) и TERM=dumb (терминал, честно объявивший, что ANSI не умеет).
+	// Явный EYE_COLOR сильнее общих сигналов: конкретное бьёт общее.
 	color := false
 	fd, onTTY := cfg.terminalFd()
 	switch {
@@ -138,6 +147,10 @@ func loadConfig(opts ...Option) config {
 			// надо — иначе legacy-conhost напечатает «←[38;5;…m» буквально
 			term.EnableColor(fd)
 		}
+	case os.Getenv("NO_COLOR") != "":
+		color = false
+	case os.Getenv("TERM") == "dumb":
+		color = false
 	case onTTY:
 		color = term.EnableColor(fd)
 	}

@@ -13,10 +13,11 @@ import (
 // Кадр странствия:
 //
 //	строка 0      — картуш: галерея корней [1] [2] …
-//	строка 1      — ярлыки зон: ▌ ДЕРЕВО ▐ │ ── детали (ответ на «где я» после Tab)
-//	строки 2..H-2 — дерево │ детали («Гримуар»)
+//	строка 1      — ярлыки зон + счётчики позиции: ▌ ДЕРЕВО ▐ 3/12 ─│─ детали ─ 5/60 ─
+//	строка 2      — путь-крошки: где курсор, даже когда предки уехали за окно
+//	строки 3..H-2 — дерево │ детали («Гримуар»)
 //	строка H-1    — гид по клавишам / строка поиска / статус
-func (a *App) zoneH() int { return a.H - 3 }
+func (a *App) zoneH() int { return a.H - 4 }
 
 // treeW — ширина зоны дерева: примерно 2/5 экрана, но не уже 28 колонок
 // (иначе не читаются метки) и не в ущерб деталям (им нужно хотя бы ~30).
@@ -47,15 +48,18 @@ func (a *App) Frame() []string {
 	out = append(out, a.titleBar())
 	tw := a.treeW()
 	dw := a.W - tw - 1
+	// дерево и детали строятся ДО ярлыков зон: счётчики позиции в ярлыках
+	// читают уже подрезанные treeTop/detTop
+	tree := a.treeLines(tw)
+	det := a.detailLines(dw)
 	out = append(out, a.zoneTabs(tw, dw))
+	out = append(out, a.pathBar())
 	// разделитель подсвечен золотом, когда фокус в деталях — глаз сразу
 	// видит, какая зона ловит ↑↓/PgUp (приём C++-предка)
 	spine := text.CFrame
 	if a.focus == 1 {
 		spine = text.CFocus
 	}
-	tree := a.treeLines(tw)
-	det := a.detailLines(dw)
 	for i := 0; i < a.zoneH(); i++ {
 		l := &text.Line{}
 		if i < len(tree) {
@@ -102,19 +106,30 @@ func (a *App) titleBar() string {
 
 // zoneTabs — полоса ярлыков зон: активная — громкой плашкой-инверсией,
 // пассивная — тихой строчной с линейкой. Главный ответ на «где я» после Tab.
+// В хвосте каждого ярлыка — счётчик позиции: у дерева «курсор/всего узлов»,
+// у деталей «первая строка окна/всего строк» (раньше он накладывался на
+// первую строку контента и затирал рамку-картуш).
 func (a *App) zoneTabs(tw, dw int) string {
+	treeInfo := ""
+	if vis := a.S.Visible(); len(vis) > 0 {
+		treeInfo = fmt.Sprintf("%d/%d", a.S.Cursor+1, len(vis))
+	}
+	detInfo := ""
+	if !a.help && len(a.detLines) > a.zoneH() {
+		detInfo = fmt.Sprintf("%d/%d", a.detTop+1, len(a.detLines))
+	}
 	l := &text.Line{}
-	l.Add("", zoneTab("ДЕРЕВО", "дерево", a.focus == 0, tw))
+	l.Add("", zoneTab("ДЕРЕВО", "дерево", a.focus == 0, tw, treeInfo))
 	sep := text.CFrame
 	if a.focus == 1 {
 		sep = text.CFocus
 	}
 	l.Add(sep, text.Rune("│", "|"))
-	l.Add("", zoneTab("ДЕТАЛИ", "детали", a.focus == 1, dw))
+	l.Add("", zoneTab("ДЕТАЛИ", "детали", a.focus == 1, dw, detInfo))
 	return l.String()
 }
 
-func zoneTab(loud, quiet string, active bool, width int) string {
+func zoneTab(loud, quiet string, active bool, width int, info string) string {
 	rule := text.Rune("─", "-")
 	var chip, style string
 	if active {
@@ -129,10 +144,59 @@ func zoneTab(loud, quiet string, active bool, width int) string {
 	}
 	l := &text.Line{}
 	l.Add(style, chip)
+	if info != "" {
+		tail := " " + info + " "
+		if l.W()+text.VisWidth(tail) <= width {
+			l.Add(text.CNote, tail)
+		}
+	}
 	if fill := width - l.W(); fill > 0 {
 		l.Add(text.CFrame, strings.Repeat(rule, fill))
 	}
 	return l.String()
+}
+
+// pathBar — строка-крошки: путь узла под курсором от корня галереи.
+// Ответ на «где я», который не зависит от прокрутки: предки могли уехать
+// за окно, путь — остаётся. При нехватке ширины середина сжимается первой —
+// корень и последние звенья отвечают на вопрос лучше всего.
+func (a *App) pathBar() string {
+	n := a.S.Current()
+	if n == nil {
+		return ""
+	}
+	segs := n.Path()
+	sep := text.Rune(" › ", " > ")
+	dots := text.Rune("⋯", "...")
+	dropped := false
+	build := func() string {
+		l := &text.Line{}
+		l.Sp(1)
+		for i, s := range segs {
+			if i > 0 {
+				l.Add(text.CFrame, sep)
+			}
+			if dropped && i == 1 {
+				l.Add(text.CNote, dots).Add(text.CFrame, sep)
+			}
+			style := text.CNote
+			if i == len(segs)-1 {
+				style = text.CName
+			}
+			l.Add(style, s)
+		}
+		return l.String()
+	}
+	s := build()
+	for text.VisWidth(s) > a.W && len(segs) > 3 {
+		segs = append(segs[:1:1], segs[2:]...)
+		dropped = true
+		s = build()
+	}
+	if text.VisWidth(s) > a.W {
+		s = text.ClipVis(s, a.W)
+	}
+	return s
 }
 
 func root(n *nav.Node) *nav.Node {
@@ -171,9 +235,28 @@ func (a *App) treeLines(w int) []string {
 	if a.treeTop > len(vis)-1 {
 		a.treeTop = maxI(0, len(vis)-1)
 	}
+	// края прокрутки: первую/последнюю строку окна занимает маркер «ещё N» —
+	// курсор не должен прятаться под ним (в игольном окне h<4 не до маркеров)
+	marks := h >= 4 && len(vis) > h
+	if marks {
+		if a.treeTop > 0 && a.S.Cursor <= a.treeTop {
+			a.treeTop = maxI(0, a.S.Cursor-1)
+		}
+		if a.treeTop+h < len(vis) && a.S.Cursor >= a.treeTop+h-1 {
+			a.treeTop = minI(len(vis)-h, a.S.Cursor-h+2)
+		}
+	}
 	var out []string
 	for i := a.treeTop; i < len(vis) && len(out) < h; i++ {
 		out = append(out, a.treeLine(vis[i], i == a.S.Cursor, w))
+	}
+	if marks && a.treeTop > 0 {
+		out[0] = text.Paint(text.CNote,
+			" "+text.Rune("↑", "^")+fmt.Sprintf(" ещё %d выше", a.treeTop+1))
+	}
+	if marks && a.treeTop+h < len(vis) && len(out) == h {
+		out[h-1] = text.Paint(text.CNote,
+			" "+text.Rune("↓", "v")+fmt.Sprintf(" ещё %d ниже", len(vis)-a.treeTop-h+1))
 	}
 	return out
 }
@@ -211,6 +294,10 @@ func (a *App) treeLine(n *nav.Node, cursor bool, w int) string {
 
 func expander(n *nav.Node) (string, string) {
 	switch {
+	case n.Cycle != nil && n.Shared:
+		// разделяемая ссылка (ромб/DAG): объект уже показан в ДРУГОЙ ветке —
+		// честно не путать с циклом
+		return text.Rune("≡", "&"), text.CItab
 	case n.Cycle != nil:
 		return text.Rune("⟲", "@"), text.CItab
 	case n.Refusal != "":
@@ -252,17 +339,8 @@ func (a *App) detailLines(w int) []string {
 		}
 		out = append(out, s)
 	}
-	// индикатор прокрутки — СТРОГО внутри ширины зоны: строка длиннее
-	// терминала вызывает автоперенос, прокрутку и мерцание всего экрана
-	if len(a.detLines) > h && len(out) > 0 {
-		pos := fmt.Sprintf(" %d/%d ", a.detTop+1, len(a.detLines))
-		keep := w - text.VisWidth(pos)
-		first := out[0]
-		if text.VisWidth(first) > keep {
-			first = text.ClipVis(first, keep)
-		}
-		out[0] = text.PadVis(first, keep) + text.Paint(text.CNote, pos)
-	}
+	// счётчик прокрутки живёт в ярлыке зоны (zoneTabs) — контент деталей
+	// он больше не затирает
 	return out
 }
 
@@ -312,10 +390,13 @@ func helpLines() []string {
 		"  1..9          прыжок к N-му корню галереи",
 		"  /, n, N       поиск по раскрытым узлам, дальше/назад",
 		"  s · S         снимок в файл: точная копия экрана · документ",
-		"  ?/F1 · q/Esc  помощь · выход",
+		"  ?/F1 · q      помощь · выход (сразу)",
+		"  Esc           шаг наружу: помощь/панель/фокус; дважды подряд — выход",
 		"",
 		"  Переходы типизированные. Честные отказы: nil, unsafe.Pointer",
-		"  (тип стёрт), func (код, не данные). Узел-цикл помечен " + text.Rune("⟲", "@") + ".",
+		"  (тип стёрт), func (код, не данные). Повтор адреса: " + text.Rune("⟲", "@") +
+			" цикл (оригинал —",
+		"  предок), " + text.Rune("≡", "&") + " разделяемая ссылка (второй путь к тому же объекту).",
 		"  Объекты галереи живут, пока идёт Run() — Око смотрит на",
 		"  живую память и копий не делает (кроме значений map).",
 	}

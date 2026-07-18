@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/vitikevich-landau/go_magic_eye/internal/nav"
+	"github.com/vitikevich-landau/go_magic_eye/internal/render"
 	"github.com/vitikevich-landau/go_magic_eye/internal/text"
 )
 
@@ -75,6 +76,81 @@ func TestScriptCycleMark(t *testing.T) {
 	out := runScript(t, "enter down down down enter")
 	if !strings.Contains(out, "уже показан") {
 		t.Fatalf("цикл ⟲ не распознан:\n%s", out)
+	}
+}
+
+// Настоящий цикл (оригинал — предок узла: Pal указывает на самого странника)
+// зовётся циклом и в подписи, и в деталях.
+func TestCycleNamedCycle(t *testing.T) {
+	out := runScript(t, "enter down down down enter down")
+	if !strings.Contains(out, "цикл") {
+		t.Fatalf("повтор с оригиналом-предком должен зваться циклом:\n%s", out)
+	}
+}
+
+// Разделяемая ссылка (второй указатель на тот же объект из другой ветки —
+// ромб/DAG) честно НЕ зовётся циклом: свой глиф и своё объяснение.
+func TestSharedRefDistinctFromCycle(t *testing.T) {
+	type purse struct{ Gold int }
+	type twin struct{ A, B *purse }
+	p := &purse{Gold: 7}
+	tw := &twin{A: p, B: p}
+	s := nav.NewSession()
+	s.AddRoot(reflect.ValueOf(tw).Elem(), "близнецы")
+	app := NewApp(s, t.TempDir())
+	var b strings.Builder
+	app.RunScript(strings.Fields("enter down enter down down enter down"), &b, 100, 24)
+	out := b.String()
+	if !strings.Contains(out, "разделяемая ссылка") {
+		t.Fatalf("повтор из другой ветки должен зваться разделяемой ссылкой:\n%s", out)
+	}
+}
+
+// Esc больше не убивает странствие с одного нажатия (Alt+клавиша приходит
+// как одинокий Esc): сперва шаг наружу по слоям, выход — только двойным Esc.
+func TestEscStepsOutBeforeQuit(t *testing.T) {
+	app := NewApp(session(t), t.TempDir())
+	app.W, app.H = 100, 24
+	esc := Key{Type: KEsc}
+	x, _ := ParseScriptKey("x")
+	tab, _ := ParseScriptKey("tab")
+	down, _ := ParseScriptKey("down")
+
+	app.Handle(x) // панель hex
+	if app.Handle(esc) {
+		t.Fatal("Esc при открытой панели не должен выходить")
+	}
+	if app.panel != render.PanelAll {
+		t.Fatal("Esc должен вернуть панель «всё»")
+	}
+	app.Handle(tab) // фокус в детали
+	if app.Handle(esc) {
+		t.Fatal("Esc из деталей не должен выходить")
+	}
+	if app.focus != 0 {
+		t.Fatal("Esc должен вернуть фокус в дерево")
+	}
+	if app.Handle(esc) {
+		t.Fatal("первый Esc в чистом состоянии — только взвод, не выход")
+	}
+	app.Handle(down) // любая другая клавиша снимает взвод
+	if app.Handle(esc) {
+		t.Fatal("после другой клавиши Esc должен взводиться заново, не выходить")
+	}
+	if !app.Handle(esc) {
+		t.Fatal("двойной Esc подряд должен выйти")
+	}
+}
+
+// Строка-крошки: путь узла под курсором виден в кадре, счётчик позиции —
+// в ярлыке зоны дерева.
+func TestBreadcrumbsAndTreeCounter(t *testing.T) {
+	out := runScript(t, "enter down down enter down")
+	if !strings.Contains(out, "странник "+text.Rune("›", ">")+" Bag") {
+		t.Fatalf("в кадре нет пути-крошек «странник › Bag»:\n%s", out)
+	}
+	if !strings.Contains(out, "4/5") {
+		t.Fatalf("в ярлыке дерева нет счётчика позиции 4/5:\n%s", out)
 	}
 }
 
