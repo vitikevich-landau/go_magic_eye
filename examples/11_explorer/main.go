@@ -3,6 +3,10 @@
 package main
 
 import (
+	"errors"
+	"log"
+	"os"
+
 	eye "github.com/vitikevich-landau/go_magic_eye"
 )
 
@@ -42,5 +46,10 @@ func main() {
 	g := eye.NewGallery()
 	g.Add(&galahad, "Галахад").Add(&lancelot, "Ланселот").Add(nums, "числа")
 	g.AddType(eye.TypeOf[Config](), "конфиг (тип)")
-	g.Run()
+	if err := g.Run(); err != nil {
+		if errors.Is(err, eye.ErrInterrupted) {
+			os.Exit(130) // Ctrl-C: код выхода выбирает программа, не Око
+		}
+		log.Fatal(err)
+	}
 }

@@ -50,6 +50,12 @@ func NewApp(s *nav.Session, snapDir string) *App {
 	return &App{S: s, panel: render.PanelAll, snapDir: snapDir}
 }
 
+// ErrInterrupted — странствие прервано сигналом (Ctrl-C/SIGTERM). Терминал
+// к моменту возврата уже восстановлен; решение «жить дальше или выйти» — за
+// вызывающим (eye.Gallery.Run отдаёт его наверх как eye.ErrInterrupted, код
+// выхода выбирает программа-хозяин).
+var ErrInterrupted = errors.New("странствие прервано сигналом")
+
 // Run — интерактивный цикл: raw-терминал, альтернативный экран,
 // восстановление при любом исходе (defer + сигналы).
 //
@@ -59,11 +65,6 @@ func NewApp(s *nav.Session, snapDir string) *App {
 // одинокий Esc (Flush) и заметить смену размера окна. Побочная выгода —
 // после выхода не остаётся «застрявшего» читателя, крадущего stdin у
 // программы-хозяина.
-// ErrInterrupted — странствие прервано сигналом (Ctrl-C/SIGTERM). Терминал
-// к моменту возврата уже восстановлен; решение «жить дальше или выйти» — за
-// вызывающим (eye.Gallery.Run выходит с кодом 130, как принято у Unix).
-var ErrInterrupted = errors.New("странствие прервано сигналом")
-
 func (a *App) Run() error {
 	restore, err := term.Raw()
 	if err != nil {
@@ -131,7 +132,7 @@ func (a *App) Run() error {
 // кадр по устаревшему большему, строки перенесутся и экран разъедется;
 // про «слишком мало» честно скажет сам Frame.
 func (a *App) resize() {
-	w, h, ok := term.Size()
+	w, h, ok := term.Size(os.Stdout.Fd()) // TUI рисует в stdout
 	if !ok {
 		if a.W == 0 {
 			a.W, a.H = 100, 32

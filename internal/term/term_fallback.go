@@ -6,9 +6,9 @@ import "errors"
 
 // Прочие ОС: Око честно признаётся, что интерактива нет, и печатает статикой.
 
-func isTerminal(fd uintptr) bool { return false }
-func size() (int, int, bool)     { return 0, 0, false }
-func enableColor() bool          { return false }
+func isTerminal(fd uintptr) bool       { return false }
+func size(fd uintptr) (int, int, bool) { return 0, 0, false }
+func enableColor(fd uintptr) bool      { return false }
 func raw() (func(), error) {
 	return nil, errors.New("eye: на этой платформе raw-терминал не поддержан — только статическая печать")
 }
