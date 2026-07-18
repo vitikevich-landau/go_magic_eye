@@ -31,8 +31,13 @@ func isTerminal(fd uintptr) bool {
 	return ioctlTermios(fd, ioctlGet, &t) == nil
 }
 
-// Unix-терминалы исполняют ANSI без дополнительных приглашений.
-func enableColor(uintptr) bool { return true }
+// Unix-терминалы исполняют ANSI без дополнительных приглашений — кроме тех,
+// что честно объявили о своей бедности: TERM=dumb (Emacs shell, простые CI)
+// или пустой TERM. Слать им 256-цветные коды — замусорить вывод.
+func enableColor(uintptr) bool {
+	t := os.Getenv("TERM")
+	return t != "" && t != "dumb"
+}
 
 type winsize struct{ rows, cols, x, y uint16 }
 

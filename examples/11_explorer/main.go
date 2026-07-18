@@ -38,7 +38,9 @@ func main() {
 	lancelot := Knight{Unit: Unit{hp: 100, speed: 7}, Name: "Ланселот", Bag: &bag}
 	galahad := Knight{Unit: Unit{hp: 90, speed: 9}, Name: "Галахад", Bag: &bag,
 		Friend: &lancelot, Deeds: map[string]int{"драконы": 2, "турниры": 17}}
-	lancelot.Friend = &galahad // цикл: Око покажет ⟲ вместо дубля
+	lancelot.Friend = &galahad // взаимная дружба: Око пометит повтор вместо дубля
+	// (⟲ — если оригинал предок, ≡ — разделяемая ссылка на другую ветку;
+	// общий bag у двух рыцарей — тоже ≡: ромб, не цикл)
 
 	nums := make([]int, 0, 8)
 	nums = append(nums, 3, 1, 4, 1, 5)

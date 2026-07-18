@@ -78,18 +78,41 @@ func oneIface(f *model.Iface, o Options) []string {
 		for _, mt := range f.Methods {
 			nameW = max(nameW, text.VisWidth(mt.Name))
 		}
+		arrow2 := text.Rune(" → ", " -> ")
 		for i, mt := range f.Methods {
+			prefix := fmt.Sprintf("      слот %d: ", i)
 			l := &text.Line{}
-			l.Addf(text.CFrame, "      слот %d: ", i)
-			l.Add(text.CItab, mt.Name).Sp(nameW - text.VisWidth(mt.Name))
-			if mt.PC != 0 {
-				l.Add(text.CFrame, text.Rune(" → ", " -> "))
-				l.Add(text.CVal, mt.Func)
-				l.Addf(text.CAddr, " @ 0x%x", mt.PC)
-			} else {
+			l.Add(text.CFrame, prefix)
+			l.Add(text.CItab, mt.Name)
+			if mt.PC == 0 {
+				l.Sp(nameW - text.VisWidth(mt.Name))
 				l.Add(text.CNote, " (слот не читали)")
+				out = append(out, l.String())
+				continue
 			}
+			addr := fmt.Sprintf(" @ 0x%x", mt.PC)
+			pad := nameW - text.VisWidth(mt.Name)
+			if l.W()+pad+text.VisWidth(arrow2)+text.VisWidth(mt.Func)+text.VisWidth(addr) <= o.inner() {
+				l.Sp(pad)
+				l.Add(text.CFrame, arrow2)
+				l.Add(text.CVal, mt.Func)
+				l.Add(text.CAddr, addr)
+				out = append(out, l.String())
+				continue
+			}
+			// имя функции длиннее строки: PC — то, ради чего диаграмма
+			// существует, — остаётся на первой строке; имя уходит на
+			// продолжение (при нужде — со сжатой серединой import-пути)
+			l.Add(text.CAddr, addr)
 			out = append(out, l.String())
+			c := (&text.Line{}).Sp(text.VisWidth(prefix))
+			c.Add(text.CFrame, text.Rune("↳ ", "-> "))
+			fn := mt.Func
+			if b := o.inner() - c.W(); text.VisWidth(fn) > b {
+				fn = text.ClipVisMid(fn, b)
+			}
+			c.Add(text.CVal, fn)
+			out = append(out, c.String())
 		}
 	}
 	if f.Note != "" {
@@ -99,6 +122,5 @@ func oneIface(f *model.Iface, o Options) []string {
 		}
 		out = append(out, wrapAt(2, text.Rune("✦ ", "* "), f.Note, o.inner(), style)...)
 	}
-	_ = fmt.Sprint
 	return out
 }

@@ -5,10 +5,11 @@ package nav
 
 import (
 	"fmt"
-	"github.com/vitikevich-landau/go_magic_eye/internal/text"
 	"reflect"
+	"strings"
 
 	"github.com/vitikevich-landau/go_magic_eye/internal/model"
+	"github.com/vitikevich-landau/go_magic_eye/internal/text"
 )
 
 // PageSize — элементов коллекции на одну страницу дерева.
@@ -24,7 +25,8 @@ type Node struct {
 	Depth    int
 	Expanded bool
 	Refusal  string // почему узел не раскрыть («nil», «тип стёрт», …)
-	Cycle    *Node  // переход ведёт к уже показанному узлу (⟲)
+	Cycle    *Node  // переход ведёт к уже показанному узлу (⟲ цикл / ≡ разделение)
+	Shared   bool   // оригинал Cycle — НЕ предок: разделяемая ссылка (ромб/DAG), не цикл
 	Copied   string // пометка «это копия, не живая память» (map-значения)
 
 	kids       []*Node
@@ -86,10 +88,19 @@ func (n *Node) Detail() *model.Model {
 			label += " (копия)"
 		}
 		if n.Cycle != nil {
-			n.detail = &model.Model{Label: "цикл " + text.Rune("⟲", "@"), Notes: []string{
-				"этот адрес уже показан в дереве — дублей Око не плодит.",
-				"Enter — прыжок к существующему узлу; b — назад.",
-			}}
+			where := strings.Join(n.Cycle.Path(), text.Rune(" › ", " > "))
+			if n.Shared {
+				n.detail = &model.Model{Label: "разделяемая ссылка " + text.Rune("≡", "&"), Notes: []string{
+					"этот объект уже показан в дереве другим путём: " + where + ".",
+					"оригинал — НЕ предок узла: это второй путь к тому же объекту (ромб/DAG), а не подъём по собственной ветке.",
+					"Enter — прыжок к существующему узлу; b — назад.",
+				}}
+			} else {
+				n.detail = &model.Model{Label: "цикл " + text.Rune("⟲", "@"), Notes: []string{
+					"указатель ведёт к предку узла — настоящий цикл: " + where + ".",
+					"дублей Око не плодит: Enter — прыжок к существующему узлу; b — назад.",
+				}}
+			}
 		} else if n.TypeOnly != nil {
 			n.detail = model.OfType(n.TypeOnly, label)
 		} else if n.Val.IsValid() {
@@ -136,6 +147,20 @@ func (n *Node) Explain() string {
 		return "канал: содержимое живёт в hchan, читать его — украсть у горутин"
 	}
 	return ""
+}
+
+// Path — метки узла и всех его предков, от корня к самому узлу. Пища для
+// строки-крошек TUI и снимка-документа: ответ на «где я», не зависящий от
+// прокрутки.
+func (n *Node) Path() []string {
+	var segs []string
+	for p := n; p != nil; p = p.Parent {
+		segs = append(segs, p.Label)
+	}
+	for i, j := 0, len(segs)-1; i < j; i, j = i+1, j-1 {
+		segs[i], segs[j] = segs[j], segs[i]
+	}
+	return segs
 }
 
 // Addr — адрес живого значения узла (0, если неадресуемо).
