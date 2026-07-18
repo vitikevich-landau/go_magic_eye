@@ -261,11 +261,53 @@ func (b *builder) finish(t reflect.Type) {
 		}
 	}
 	if holes > 0 {
-		b.m.Notes = append(b.m.Notes, fmt.Sprintf(
-			"в объекте %d Б дыр: поля, отсортированные по убыванию выравнивания, обычно убирают их "+
-				"(Go порядок полей НЕ переставляет — раскладка в руках автора).", holes))
+		note := fmt.Sprintf("в объекте %d Б дыр (Go порядок полей НЕ переставляет — раскладка в руках автора).", holes)
+		// совет с ПЕРЕСЧЁТОМ: не «отсортируй и станет лучше», а сколько
+		// именно байт даст перестановка по убыванию выравнивания
+		if t.Kind() == reflect.Struct {
+			if opt := optimalSize(t); opt < t.Size() {
+				note = fmt.Sprintf(
+					"в объекте %d Б дыр: перестановка полей по убыванию выравнивания даст %d Б вместо %d "+
+						"(экономия %d Б; Go сам поля не переставляет).",
+					holes, opt, t.Size(), t.Size()-opt)
+			}
+		}
+		b.m.Notes = append(b.m.Notes, note)
 	}
-	_ = t
+}
+
+// optimalSize — размер структуры при «жадной» раскладке: поля по убыванию
+// выравнивания (при равном — по убыванию размера). Для плоских структур это
+// минимум padding'а; учебная оценка — вложенные структуры не пересобираются.
+func optimalSize(t reflect.Type) uintptr {
+	n := t.NumField()
+	if n == 0 {
+		return t.Size()
+	}
+	fs := make([]reflect.StructField, n)
+	for i := range fs {
+		fs[i] = t.Field(i)
+	}
+	sort.SliceStable(fs, func(i, j int) bool {
+		ai, aj := fs[i].Type.Align(), fs[j].Type.Align()
+		if ai != aj {
+			return ai > aj
+		}
+		return fs[i].Type.Size() > fs[j].Type.Size()
+	})
+	var off, maxA uintptr = 0, 1
+	for _, f := range fs {
+		a := uintptr(f.Type.Align())
+		if a == 0 {
+			a = 1
+		}
+		if a > maxA {
+			maxA = a
+		}
+		off = (off + a - 1) / a * a // выровнять начало поля
+		off += f.Type.Size()
+	}
+	return (off + maxA - 1) / maxA * maxA // хвост до кратного align структуры
 }
 
 // pathless — имя для выносок безымянных корней.
