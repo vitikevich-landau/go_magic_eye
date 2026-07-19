@@ -1,0 +1,24 @@
+//eye:title Дженерики: мономорфизация
+//eye:topic инстанцирование, полиморфизм без itab
+// Урок 6: дженерик — не коробка с itab, а ШТАМПОВКА типов: для каждого T
+// компилятор отливает отдельный конкретный тип. Сравни размеры и раскладку
+// Pair[int8] и Pair[string] — это два разных типа, слов-таблиц в них нет.
+package main
+
+import (
+	eye "github.com/vitikevich-landau/go_magic_eye"
+)
+
+type Pair[T any] struct {
+	First  T
+	Second T
+	Count  int32
+}
+
+func main() {
+	small := Pair[int8]{First: 1, Second: 2, Count: 1}
+	big := Pair[string]{First: "меч", Second: "щит", Count: 2}
+
+	eye.Inspect(&small, "Pair[int8]")
+	eye.Inspect(&big, "Pair[string]")
+}

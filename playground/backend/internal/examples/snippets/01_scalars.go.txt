@@ -1,0 +1,35 @@
+//eye:title Скаляры и указатели
+//eye:topic little-endian, «enum» через iota, указатель
+// Урок 1: как лежат в памяти простые вещи.
+//
+// Числа хранятся little-endian: младший байт — первым. Кликни по полю
+// на карте памяти — байты сами развернутся в число.
+package main
+
+import (
+	eye "github.com/vitikevich-landau/go_magic_eye"
+)
+
+// Rank — «enum» по-гошному: именованный тип + iota.
+type Rank uint8
+
+const (
+	Novice Rank = iota
+	Adept
+	Master
+)
+
+type Wizard struct {
+	Mana  int32 // 4 байта: посмотри на 0x64 в младшем байте
+	Level Rank  // 1 байт
+	Power float64
+}
+
+func main() {
+	w := Wizard{Mana: 100, Level: Master, Power: 9000.5}
+	eye.Inspect(&w, "волшебник")
+
+	// указатель — просто слово с адресом: Око покажет и слово, и цель
+	p := &w.Mana
+	eye.Inspect(&p, "указатель на ману")
+}

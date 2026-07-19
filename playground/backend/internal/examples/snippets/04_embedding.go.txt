@@ -1,0 +1,40 @@
+//eye:title Встраивание — композиция вместо наследования
+//eye:topic анонимные поля, под-объекты, продвижение методов
+// Урок 4: встроенная структура — под-объект по offset'у, как база в C++.
+// Её методы «продвигаются» наружу — но vptr в объекте нет: он чист.
+//
+// Секция «встраивание» показывает этажи; клик по этажу подсветит его байты.
+package main
+
+import (
+	eye "github.com/vitikevich-landau/go_magic_eye"
+)
+
+type Creature struct {
+	HP    int32
+	Speed int16
+}
+
+func (c *Creature) Breathe() {}
+
+type Wings struct {
+	Span float64
+}
+
+func (w *Wings) Flap() {}
+
+// Dragon — два встроенных под-объекта + свои поля.
+type Dragon struct {
+	Creature         // offset 0: под-объект
+	Wings            // ещё один, дальше по памяти
+	Gold     int64
+}
+
+func main() {
+	d := Dragon{
+		Creature: Creature{HP: 9000, Speed: 30},
+		Wings:    Wings{Span: 12.5},
+		Gold:     100000,
+	}
+	eye.Inspect(&d, "дракон")
+}
