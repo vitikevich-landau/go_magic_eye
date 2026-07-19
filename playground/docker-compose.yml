@@ -1,0 +1,25 @@
+# Запуск playground одной командой из этой папки:
+#
+#   docker compose up --build
+#   → http://localhost:8080
+#
+# Лимиты ниже — страховка от случайного вреда (вечный цикл, fork-бомба);
+# точечные рычаги песочницы — переменные EYE_PG_* (см. backend/main.go).
+services:
+  playground:
+    build:
+      context: ..
+      dockerfile: playground/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      EYE_PG_RUN_TIMEOUT: 5s
+      EYE_PG_COMPILE_TIMEOUT: 30s
+      EYE_PG_ISOLATE: auto
+    # снипетты собираются и живут в /tmp — быстрый tmpfs, чистится сам
+    tmpfs:
+      - /tmp:size=512m
+    mem_limit: 1g
+    pids_limit: 256
+    init: true
+    restart: unless-stopped

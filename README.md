@@ -205,6 +205,11 @@ go run ./examples/11_explorer            # интерактивное стран
 go test ./...                            # тесты (модель, текст, клавиши, снапшоты TUI)
 ```
 
+Есть и **веб-версия** — [playground/](playground/): редактор кода в браузере
+с диагностиками настоящего компилятора и интерактивной картой памяти
+(hover по байтам, анимация little-endian, диаграмма itab). Поднимается
+одной командой: `cd playground && docker compose up --build`.
+
 Нужен статический вывод для чтения/диффа — перенаправь в файл или пайп, Око
 само деградирует в печать: `go run ./examples/11_explorer | less` (или
 `EYE_INTERACTIVE=0 go run ./examples/11_explorer`).

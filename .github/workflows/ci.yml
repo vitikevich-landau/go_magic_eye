@@ -42,3 +42,32 @@ jobs:
       - run: GOOS=freebsd go build ./...
       - run: GOOS=windows GOARCH=386 go build ./...
       - run: GOOS=darwin GOARCH=arm64 go build ./...
+
+  # веб-версия Ока: песочница гоняет живой go build — нужен toolchain
+  playground-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - run: go vet ./...
+        working-directory: playground/backend
+      - run: go test ./...
+        working-directory: playground/backend
+
+  playground-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: playground/frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: playground/frontend
+      - run: npm test
+        working-directory: playground/frontend
+      - run: npm run build
+        working-directory: playground/frontend

@@ -1,0 +1,7 @@
+# контекст сборки playground/Dockerfile — корень репозитория
+.git
+docs
+playground/frontend/node_modules
+playground/frontend/e2e/shots
+playground/frontend/tsconfig.tsbuildinfo
+playground/backend/web/dist
