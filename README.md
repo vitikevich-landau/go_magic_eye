@@ -232,6 +232,7 @@ go test ./...                            # тесты (модель, текст,
 | `EYE_HEIGHT=N`  | высота кадра в EYE_SCRIPT-режиме (по умолчанию 40)       |
 | `EYE_ASCII=1`   | рамки/стрелки — чистый ASCII (бедные шрифты)             |
 | `EYE_FORMAT=json` | машинный вид: JSON-модель вместо рамок (playground, снапшоты, диффы); программно — `WithFormat(eye.JSON)` |
+| `EYE_SESSION=1` | `Explore`/галерея: живой JSON-диалог по stdin/stdout вместо TUI — на нём стоит странствие в браузере |
 | `EYE_SNAP_DIR=…`| каталог для снимков экрана клавишей `s` (иначе текущий)  |
 | `NO_COLOR`      | цвет выкл ([no-color.org](https://no-color.org), непустое значение); явный `EYE_COLOR` сильнее |
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/vitikevich-landau/go_magic_eye/internal/model"
 	"github.com/vitikevich-landau/go_magic_eye/internal/nav"
+	"github.com/vitikevich-landau/go_magic_eye/internal/proto"
 	"github.com/vitikevich-landau/go_magic_eye/internal/render"
 	"github.com/vitikevich-landau/go_magic_eye/internal/term"
 	"github.com/vitikevich-landau/go_magic_eye/internal/tui"
@@ -79,6 +80,12 @@ func (g *Gallery) AddType(m TypeMarker, label ...string) *Gallery {
 // ошибку.
 func (g *Gallery) Run() error {
 	cfg := loadConfig(g.opts...)
+	// сеансовый протокол — самый сильный режим: клиент (playground, плагин)
+	// явно попросил живой диалог по stdin/stdout (см. internal/proto)
+	if envBool("EYE_SESSION", false) {
+		proto.Run(g.session(), os.Stdin, cfg.out)
+		return nil
+	}
 	// машинный вид сильнее странствия и скрипта: программа, запущенная ради
 	// JSON (playground, снапшот), должна отдать JSON, даже если в окружении
 	// завалялся EYE_SCRIPT

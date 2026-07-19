@@ -30,6 +30,8 @@ import (
 //	EYE_ASCII=1        рамки и стрелки — чистый ASCII
 //	EYE_SNAP_DIR=…     каталог для снимков экрана клавишей s
 //	EYE_FORMAT=json    вместо рамок печатать JSON-модель (машинный вид)
+//	EYE_SESSION=1      Explore/галерея: сеансовый JSON-протокол по
+//	                   stdin/stdout вместо TUI (см. internal/proto)
 //
 // Кроме своих переменных Око уважает общепринятые сигналы: NO_COLOR
 // (непустое значение — цвет выкл) и TERM=dumb; явный EYE_COLOR их
