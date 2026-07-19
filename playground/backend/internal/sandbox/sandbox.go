@@ -90,7 +90,7 @@ type CheckResult struct {
 type RunResult struct {
 	OK        bool        `json:"ok"`
 	Diags     []diag.Diag `json:"diagnostics"`
-	Envelope  []byte      `json:"-"` // слитый JSON-конверт Ока (nil — Око молчало)
+	Envelope  []byte      `json:"-"`      // слитый JSON-конверт Ока (nil — Око молчало)
 	Stdout    string      `json:"stdout"` // вывод программы БЕЗ конвертов
 	Stderr    string      `json:"stderr"`
 	TimedOut  bool        `json:"timed_out"`
