@@ -113,6 +113,7 @@ export const useExplore = defineStore('explore', {
           n.children = this.ingest(res.nodes ?? [], id)
         } catch (e) {
           if (e instanceof SessionGoneError) this.dead(e.message)
+          else this.error = (e as Error).message
           return
         }
       }
@@ -130,6 +131,7 @@ export const useExplore = defineStore('explore', {
         this.detail = res.ok && res.eye ? (res.eye.models[0] ?? null) : null
       } catch (e) {
         if (e instanceof SessionGoneError) this.dead(e.message)
+        else this.error = (e as Error).message
       } finally {
         this.detailLoading = false
       }

@@ -45,7 +45,11 @@ export async function exploreCmd(
     body: JSON.stringify({ session, cmd, node }),
   })
   const body = await resp.json().catch(() => null)
-  if (resp.status === 410) throw new SessionGoneError(body?.error ?? 'сеанс завершился')
+  // 410 — сеанс умер на глазах сервера; 404 — жнец уже вычеркнул его из
+  // реестра. Для клиента это одно и то же: сеанса больше нет
+  if (resp.status === 410 || resp.status === 404) {
+    throw new SessionGoneError(body?.error ?? 'сеанс завершился')
+  }
   if (!resp.ok) throw new Error(body?.error ?? `HTTP ${resp.status}`)
   return body as ExploreCmdResponse
 }

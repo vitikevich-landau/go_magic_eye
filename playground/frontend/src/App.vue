@@ -129,7 +129,7 @@ async function share() {
     <!-- две зоны -->
     <main class="flex min-h-0 grow">
       <section :style="{ width: split + '%' }" class="min-w-0">
-        <MonacoEditor :model-value="pg.code" :diagnostics="pg.diagnostics" @update:model-value="onCode" @run="pg.run()" />
+        <MonacoEditor :model-value="pg.code" :diagnostics="pg.diagnostics" @update:model-value="onCode" @run="look()" />
       </section>
 
       <div

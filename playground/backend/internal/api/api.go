@@ -4,7 +4,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -20,15 +19,12 @@ import (
 // Server — API поверх песочницы.
 type Server struct {
 	runner *sandbox.Runner
-	// queueWait — сколько запрос готов стоять в очереди за слотом песочницы,
-	// прежде чем получить 429
-	queueWait time.Duration
 }
 
 // New — маршрутизатор API. static — файловая система фронтенда (go:embed);
 // nil — раздаётся только API (удобно в тестах).
 func New(runner *sandbox.Runner, static http.Handler) http.Handler {
-	s := &Server{runner: runner, queueWait: 15 * time.Second}
+	s := &Server{runner: runner}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/check", s.handleCheck)
 	mux.HandleFunc("POST /api/run", s.handleRun)
@@ -61,9 +57,9 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), s.queueWait)
-	defer cancel()
-	res, err := s.runner.Check(ctx, code)
+	// дедлайн тут не навешивается: очередь ограничивает себя сама
+	// (Options.QueueWait), а компиляции положен её полный CompileTimeout
+	res, err := s.runner.Check(r.Context(), code)
 	if err != nil {
 		s.sandboxError(w, err)
 		return
@@ -76,9 +72,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), s.queueWait)
-	defer cancel()
-	res, err := s.runner.Run(ctx, code)
+	res, err := s.runner.Run(r.Context(), code)
 	if err != nil {
 		s.sandboxError(w, err)
 		return
@@ -115,9 +109,7 @@ func (s *Server) handleExplore(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), s.queueWait)
-	defer cancel()
-	live, res, err := s.runner.StartSession(ctx, code)
+	live, res, err := s.runner.StartSession(r.Context(), code)
 	switch {
 	case errors.Is(err, sandbox.ErrNoSession):
 		writeJSON(w, http.StatusOK, exploreResponse{

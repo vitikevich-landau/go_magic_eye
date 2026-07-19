@@ -30,6 +30,7 @@ type Options struct {
 	MaxCode        int64         // 128 КиБ на снипетт
 	MemLimit       string        // GOMEMLIMIT запущенной программы
 	Concurrency    int           // одновременных сборок (NumCPU)
+	QueueWait      time.Duration // ожидание места в очереди до ErrBusy (15 с)
 	Isolate        bool          // оборачивать запуск в unshare -rn (без сети)
 
 	// пределы живых сеансов странствия (session.go)
@@ -72,6 +73,9 @@ func New(opts Options) *Runner {
 	if opts.Concurrency == 0 {
 		opts.Concurrency = runtime.NumCPU()
 	}
+	if opts.QueueWait == 0 {
+		opts.QueueWait = 15 * time.Second
+	}
 	if opts.SessionMax == 0 {
 		opts.SessionMax = defaultSessionMax
 	}
@@ -90,12 +94,17 @@ func (r *Runner) MaxCode() int64 { return r.opts.MaxCode }
 // ErrBusy — очередь сборок переполнена; API отвечает 429.
 var ErrBusy = fmt.Errorf("песочница занята: слишком много одновременных сборок")
 
-// acquire — место в очереди или ErrBusy по истечении ctx.
+// acquire — место в очереди или ErrBusy. Ожидание ограничено QueueWait
+// ЗДЕСЬ, а не дедлайном входного ctx: иначе таймаут очереди дожил бы до
+// компиляции и втихую урезал бы CompileTimeout (ctx остаётся родителем —
+// отмена запроса клиентом сработает).
 func (r *Runner) acquire(ctx context.Context) (release func(), err error) {
+	qctx, cancel := context.WithTimeout(ctx, r.opts.QueueWait)
+	defer cancel()
 	select {
 	case r.sem <- struct{}{}:
 		return func() { <-r.sem }, nil
-	case <-ctx.Done():
+	case <-qctx.Done():
 		return nil, ErrBusy
 	}
 }
