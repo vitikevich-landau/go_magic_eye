@@ -47,7 +47,13 @@ func main() {
 		Isolate:        isolate,
 	})
 
-	web, err := fs.Sub(webFS, "web")
+	// собранный фронт живёт в web/dist (кладёт vite, вшивает go:embed);
+	// нет его — раздаётся заглушка web/index.html с инструкцией сборки
+	webDir := "web"
+	if _, err := fs.Stat(webFS, "web/dist/index.html"); err == nil {
+		webDir = "web/dist"
+	}
+	web, err := fs.Sub(webFS, webDir)
 	if err != nil {
 		log.Fatal(err)
 	}

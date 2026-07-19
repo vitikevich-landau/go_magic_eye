@@ -67,6 +67,18 @@ func TestExtractUserJSONNotStolen(t *testing.T) {
 	}
 }
 
+// Два Inspect'а подряд без печати между ними — конверты стоят встык
+// (именно так выглядит вывод обычного примера с двумя осмотрами).
+func TestExtractConsecutiveEnvelopes(t *testing.T) {
+	env, rest := ExtractEnvelopes([]byte(envA + envB))
+	if n := modelCount(t, env); n != 3 {
+		t.Errorf("моделей %d, ожидалось 3", n)
+	}
+	if strings.Contains(rest, "eye_json_version") {
+		t.Errorf("конверт утёк в остаток: %q", rest)
+	}
+}
+
 func TestExtractNoEnvelope(t *testing.T) {
 	env, rest := ExtractEnvelopes([]byte("просто текст\n"))
 	if env != nil || rest != "просто текст\n" {

@@ -22,14 +22,13 @@ func ExtractEnvelopes(out []byte) (envelope []byte, rest string) {
 	var restBuf bytes.Buffer
 
 	for pos := 0; pos < len(out); {
-		// следующий кандидат: «{» в позиции 0 или после «\n»
+		// следующий кандидат: «{» прямо на текущей позиции (начало вывода
+		// или стык двух конвертов) либо первый «{» после перевода строки
 		cand := -1
-		if pos == 0 && len(out) > 0 && out[0] == '{' {
-			cand = 0
-		} else {
-			if i := bytes.Index(out[pos:], []byte("\n{")); i >= 0 {
-				cand = pos + i + 1
-			}
+		if out[pos] == '{' {
+			cand = pos
+		} else if i := bytes.Index(out[pos:], []byte("\n{")); i >= 0 {
+			cand = pos + i + 1
 		}
 		if cand < 0 {
 			restBuf.Write(out[pos:])
