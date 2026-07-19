@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/vitikevich-landau/go_magic_eye/playground/backend/internal/diag"
@@ -30,12 +31,22 @@ type Options struct {
 	MemLimit       string        // GOMEMLIMIT запущенной программы
 	Concurrency    int           // одновременных сборок (NumCPU)
 	Isolate        bool          // оборачивать запуск в unshare -rn (без сети)
+
+	// пределы живых сеансов странствия (session.go)
+	SessionMax  int           // одновременных сеансов (8)
+	SessionIdle time.Duration // смерть по простою (3 мин)
+	SessionLife time.Duration // потолок возраста (30 мин)
+	ReapTick    time.Duration // шаг жнеца (30 с; тестам нужен мельче)
 }
 
 // Runner — песочница с очередью: не больше Concurrency сборок разом.
 type Runner struct {
 	opts Options
 	sem  chan struct{}
+
+	sessMu     sync.Mutex
+	sessions   map[string]*Live
+	reaperOnce sync.Once
 }
 
 // New — песочница с заполненными умолчаниями.
@@ -60,6 +71,15 @@ func New(opts Options) *Runner {
 	}
 	if opts.Concurrency == 0 {
 		opts.Concurrency = runtime.NumCPU()
+	}
+	if opts.SessionMax == 0 {
+		opts.SessionMax = defaultSessionMax
+	}
+	if opts.SessionIdle == 0 {
+		opts.SessionIdle = defaultSessionIdle
+	}
+	if opts.SessionLife == 0 {
+		opts.SessionLife = defaultSessionLife
 	}
 	return &Runner{opts: opts, sem: make(chan struct{}, opts.Concurrency)}
 }

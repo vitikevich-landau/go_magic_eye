@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/vitikevich-landau/go_magic_eye/playground/backend/internal/diag"
 	"github.com/vitikevich-landau/go_magic_eye/playground/backend/internal/examples"
 	"github.com/vitikevich-landau/go_magic_eye/playground/backend/internal/sandbox"
 )
@@ -31,6 +32,9 @@ func New(runner *sandbox.Runner, static http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/check", s.handleCheck)
 	mux.HandleFunc("POST /api/run", s.handleRun)
+	mux.HandleFunc("POST /api/explore", s.handleExplore)
+	mux.HandleFunc("POST /api/explore/cmd", s.handleExploreCmd)
+	mux.HandleFunc("POST /api/explore/close", s.handleExploreClose)
 	mux.HandleFunc("GET /api/examples", s.handleExamples)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("ok"))
@@ -90,6 +94,104 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleExamples(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, examples.All())
+}
+
+// ── странствие: живые сеансы ─────────────────────────────────────────
+
+// exploreResponse — ответ POST /api/explore.
+type exploreResponse struct {
+	OK          bool            `json:"ok"`
+	Diagnostics []diag.Diag     `json:"diagnostics"`
+	Session     string          `json:"session,omitempty"`
+	Roots       json.RawMessage `json:"roots,omitempty"`
+	Stdout      string          `json:"stdout,omitempty"`
+	Stderr      string          `json:"stderr,omitempty"`
+	Error       string          `json:"error,omitempty"`
+	CompileMS   int64           `json:"compile_ms"`
+}
+
+func (s *Server) handleExplore(w http.ResponseWriter, r *http.Request) {
+	code, ok := s.readCode(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), s.queueWait)
+	defer cancel()
+	live, res, err := s.runner.StartSession(ctx, code)
+	switch {
+	case errors.Is(err, sandbox.ErrNoSession):
+		writeJSON(w, http.StatusOK, exploreResponse{
+			OK: false, Diagnostics: []diag.Diag{},
+			Error: err.Error(),
+		})
+		return
+	case err != nil:
+		s.sandboxError(w, err)
+		return
+	case !res.OK: // ошибка компиляции — диагностики для маркеров
+		writeJSON(w, http.StatusOK, exploreResponse{
+			OK: false, Diagnostics: res.Diags, Stderr: res.Stderr, CompileMS: res.CompileMS,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, exploreResponse{
+		OK: true, Diagnostics: []diag.Diag{},
+		Session: live.ID, Roots: live.Roots,
+		Stdout: live.Noise(), CompileMS: live.CompileMS,
+	})
+}
+
+type exploreCmdRequest struct {
+	Session string `json:"session"`
+	Cmd     string `json:"cmd"`
+	Node    int    `json:"node"`
+}
+
+func (s *Server) handleExploreCmd(w http.ResponseWriter, r *http.Request) {
+	var req exploreCmdRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "ожидался JSON {session, cmd, node}")
+		return
+	}
+	live := s.runner.Session(req.Session)
+	if live == nil {
+		writeError(w, http.StatusNotFound, "сеанса нет: истёк или не существовал")
+		return
+	}
+	raw, err := live.Do(req.Cmd, req.Node)
+	if err != nil {
+		if errors.Is(err, sandbox.ErrSessionGone) {
+			live.Close()
+			writeError(w, http.StatusGone, "сеанс завершился (программа вышла или убита)")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// ответ протокола — passthrough; свежая печать пользователя — довеском
+	var resp map[string]any
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		writeError(w, http.StatusInternalServerError, "сеанс ответил не-JSON'ом")
+		return
+	}
+	if noise := live.Noise(); noise != "" {
+		resp["stdout"] = noise
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleExploreClose(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Session string `json:"session"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "ожидался JSON {session}")
+		return
+	}
+	if live := s.runner.Session(req.Session); live != nil {
+		live.Close()
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // readCode — тело запроса с лимитом размера снипетта; false — ответ уже ушёл.

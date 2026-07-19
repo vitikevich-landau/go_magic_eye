@@ -1,0 +1,37 @@
+//eye:title Странствие: живое дерево с циклами
+//eye:topic eye.Explore, переходы по указателям, циклы ⟲ и ≡
+// Урок 7: eye.Explore не печатает — он ОТКРЫВАЕТ объект для прогулки.
+// В терминале это TUI; здесь — живое дерево: раскрывай поля, иди по
+// указателям. Гильдия знает рыцарей, рыцари — гильдию: настоящий цикл,
+// Око пометит его ⟲ и не даст дереву развернуться в бесконечность.
+//
+// Переключись в режим «странствие» и нажми «Взглянуть».
+package main
+
+import (
+	eye "github.com/vitikevich-landau/go_magic_eye"
+)
+
+type Guild struct {
+	Name    string
+	Coffer  int64
+	Members []*Knight
+}
+
+type Knight struct {
+	Name  string
+	HP    int32
+	Home  *Guild  // назад к гильдии — цикл ⟲
+	Buddy *Knight // побратим — разделяемая ссылка ≡
+}
+
+func main() {
+	g := &Guild{Name: "Орден Ока", Coffer: 100500}
+	lancelot := &Knight{Name: "Ланселот", HP: 100, Home: g}
+	percival := &Knight{Name: "Персиваль", HP: 90, Home: g, Buddy: lancelot}
+	lancelot.Buddy = percival
+	g.Members = []*Knight{lancelot, percival}
+
+	// блокирует, пока идёт странствие; объекты обязаны жить всё это время
+	eye.Explore(g, "гильдия")
+}
