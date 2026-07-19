@@ -41,14 +41,13 @@ import (
 // Настройки — переменными окружения EYE_*; программный вывод — Finspect.
 func Inspect(obj any, label ...string) {
 	cfg := loadConfig(WithLabel(first(label)))
-	printLines(render.Render(model.Of(obj, cfg.label), cfg.renderOptions()), cfg)
+	emit(model.Of(obj, cfg.label), cfg)
 }
 
 // InspectType — только статика типа: объект не нужен.
 func InspectType[T any](label ...string) {
 	cfg := loadConfig(WithLabel(first(label)))
-	m := model.OfType(reflect.TypeOf((*T)(nil)).Elem(), cfg.label)
-	printLines(render.Render(m, cfg.renderOptions()), cfg)
+	emit(model.OfType(reflect.TypeOf((*T)(nil)).Elem(), cfg.label), cfg)
 }
 
 // Finspect — как Inspect, но печатает в w: буфер теста, файл отчёта, пайп.
@@ -57,14 +56,13 @@ func InspectType[T any](label ...string) {
 // выключен — в буфер идёт чистый текст.
 func Finspect(w io.Writer, obj any, opts ...Option) {
 	cfg := loadConfig(append([]Option{WithWriter(w)}, opts...)...)
-	printLines(render.Render(model.Of(obj, cfg.label), cfg.renderOptions()), cfg)
+	emit(model.Of(obj, cfg.label), cfg)
 }
 
 // FinspectType — как InspectType, но печатает в w. Настройки — опциями.
 func FinspectType[T any](w io.Writer, opts ...Option) {
 	cfg := loadConfig(append([]Option{WithWriter(w)}, opts...)...)
-	m := model.OfType(reflect.TypeOf((*T)(nil)).Elem(), cfg.label)
-	printLines(render.Render(m, cfg.renderOptions()), cfg)
+	emit(model.OfType(reflect.TypeOf((*T)(nil)).Elem(), cfg.label), cfg)
 }
 
 // TypeOf — маркер «типа без объекта» для галереи: g.Add(eye.TypeOf[Config]()).
@@ -82,6 +80,29 @@ func first(label []string) string {
 		return label[0]
 	}
 	return ""
+}
+
+// emit — единая точка вывода одной модели: развилка «человеку или машине».
+func emit(m *model.Model, cfg config) {
+	if cfg.format == JSON {
+		printJSON([]*model.Model{m}, cfg)
+		return
+	}
+	printLines(render.Render(m, cfg.renderOptions()), cfg)
+}
+
+// printJSON — конверт с моделями в писатель. Цвет, ширина и центрирование
+// машинного вида не касаются. Ошибка маршалинга здесь невозможна по
+// построению (в DTO только строки и числа), но глотать её молча нельзя —
+// уйдёт валидным JSON-объектом с полем error.
+func printJSON(models []*model.Model, cfg config) {
+	b, err := model.ToJSON(models)
+	if err != nil {
+		fmt.Fprintf(cfg.out, "{\"eye_json_version\":%d,\"error\":%q}\n", model.JSONVersion, err.Error())
+		return
+	}
+	b = append(b, '\n')
+	cfg.out.Write(b)
 }
 
 // printLines — вывод с центрированием (EYE_CENTER) по ширине экрана.

@@ -79,6 +79,13 @@ func (g *Gallery) AddType(m TypeMarker, label ...string) *Gallery {
 // ошибку.
 func (g *Gallery) Run() error {
 	cfg := loadConfig(g.opts...)
+	// машинный вид сильнее странствия и скрипта: программа, запущенная ради
+	// JSON (playground, снапшот), должна отдать JSON, даже если в окружении
+	// завалялся EYE_SCRIPT
+	if cfg.format == JSON {
+		printJSON(g.models(), cfg)
+		return nil
+	}
 	if script := os.Getenv("EYE_SCRIPT"); script != "" {
 		g.runScript(script, cfg)
 		return nil
@@ -137,15 +144,22 @@ func (g *Gallery) session() *nav.Session {
 }
 
 func (g *Gallery) printAll(cfg config) {
-	for _, r := range g.roots {
-		var m *model.Model
-		if r.t != nil {
-			m = model.OfType(r.t, r.label)
-		} else {
-			m = model.Of(r.obj, r.label)
-		}
+	for _, m := range g.models() {
 		printLines(render.Render(m, cfg.renderOptions()), cfg)
 	}
+}
+
+// models — модели всех корней в порядке добавления.
+func (g *Gallery) models() []*model.Model {
+	ms := make([]*model.Model, 0, len(g.roots))
+	for _, r := range g.roots {
+		if r.t != nil {
+			ms = append(ms, model.OfType(r.t, r.label))
+		} else {
+			ms = append(ms, model.Of(r.obj, r.label))
+		}
+	}
+	return ms
 }
 
 func (g *Gallery) runScript(script string, cfg config) {

@@ -1,6 +1,7 @@
 package eye_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -113,6 +114,73 @@ func TestGalleryStaticRun(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("в статической печати галереи нет %q", want)
 		}
+	}
+}
+
+// jsonEnvelope — распарсенный конверт машинного вида (для тестов ниже).
+func jsonEnvelope(t *testing.T, out string) map[string]any {
+	t.Helper()
+	var env map[string]any
+	if err := json.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("вывод не парсится как JSON: %v\n%.300s", err, out)
+	}
+	if v, ok := env["eye_json_version"].(float64); !ok || v != 1 {
+		t.Fatalf("eye_json_version = %v, ожидалась 1", env["eye_json_version"])
+	}
+	return env
+}
+
+func TestFinspectJSONFormat(t *testing.T) {
+	var b strings.Builder
+	l := loot{Gold: 1200, Gems: []string{"рубин"}}
+	eye.Finspect(&b, &l, eye.WithLabel("казна"), eye.WithFormat(eye.JSON))
+	env := jsonEnvelope(t, b.String())
+	m := env["models"].([]any)[0].(map[string]any)
+	if m["label"] != "казна" {
+		t.Errorf("label = %v", m["label"])
+	}
+	if strings.Contains(b.String(), "\x1b[") {
+		t.Error("в JSON-виде оказались ANSI-коды")
+	}
+}
+
+func TestEnvFormatJSON(t *testing.T) {
+	t.Setenv("EYE_FORMAT", "json")
+	var b strings.Builder
+	eye.Finspect(&b, 42)
+	jsonEnvelope(t, b.String())
+}
+
+func TestWithFormatBeatsEnv(t *testing.T) {
+	t.Setenv("EYE_FORMAT", "json")
+	var b strings.Builder
+	eye.Finspect(&b, 42, eye.WithFormat(eye.Text), eye.WithColor(false))
+	if strings.HasPrefix(strings.TrimSpace(b.String()), "{") {
+		t.Error("WithFormat(Text) не перекрыл EYE_FORMAT=json")
+	}
+}
+
+// Галерея в JSON-режиме отдаёт ОДИН конверт со всеми корнями — даже при
+// завалявшемся EYE_SCRIPT (машинный вид сильнее скрипта).
+func TestGalleryJSONRun(t *testing.T) {
+	t.Setenv("EYE_SCRIPT", "down q")
+	var b strings.Builder
+	l := loot{Gold: 7}
+	g := eye.NewGallery(eye.WithWriter(&b), eye.WithFormat(eye.JSON))
+	g.Add(&l, "сокровищница").Add(eye.TypeOf[Hero]())
+	if err := g.Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	env := jsonEnvelope(t, b.String())
+	ms := env["models"].([]any)
+	if len(ms) != 2 {
+		t.Fatalf("моделей %d, ожидалось 2", len(ms))
+	}
+	if ms[0].(map[string]any)["label"] != "сокровищница" {
+		t.Errorf("label первого корня = %v", ms[0].(map[string]any)["label"])
+	}
+	if ms[1].(map[string]any)["has_value"] != false {
+		t.Error("корень-тип (TypeOf) обязан прийти с has_value=false")
 	}
 }
 
