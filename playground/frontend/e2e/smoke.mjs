@@ -49,6 +49,43 @@ await page.waitForSelector('section:has-text("интерфейс")', { timeout: 
 await page.waitForTimeout(500)
 await page.screenshot({ path: `${shots}/05_ifaces.png`, fullPage: true })
 
+// странствие: живой сеанс — дерево, раскрытия, прыжок по циклу
+await page.selectOption('select', '07_explore')
+await page.click('button:has-text("странствие")')
+await page.click('button:has-text("Взглянуть")')
+await page.waitForSelector('article', { timeout: 30000 }) // Гримуар корня
+await page.screenshot({ path: `${shots}/06_explore_root.png` })
+
+// раскрыть корень, затем Members → [0] → рыцарь; дойти до цикла Home
+const expand = async (label) => {
+  const row = page.locator('div.cursor-pointer', { hasText: label }).first()
+  await row.locator('button').first().click()
+  await page.waitForTimeout(250)
+}
+await expand('гильдия')
+await expand('Members')
+await page.waitForTimeout(300)
+await page.screenshot({ path: `${shots}/07_explore_tree.png`, fullPage: true })
+
+// найти узел с меткой цикла (⟲ или ≡) — он появляется глубже: раскрываем
+// первого рыцаря
+const knight = page.locator('div.cursor-pointer', { hasText: '[0]' }).first()
+await knight.locator('button').first().click()
+await page.waitForTimeout(400)
+// [0] раскрывает узел-разыменование «цель», под ним — поля рыцаря
+await expand('цель')
+// Home — указатель назад к гильдии: раскрытие доводит до узла-цикла ⟲
+await expand('Home')
+const cycleBadge = page.locator('button:has-text("⟲"), button:has-text("≡")').first()
+if ((await cycleBadge.count()) === 0) {
+  console.error('e2e: узел-цикл ⟲/≡ не появился после раскрытия Home')
+  failed = true
+} else {
+  await cycleBadge.click() // прыжок к оригиналу
+  await page.waitForTimeout(400)
+}
+await page.screenshot({ path: `${shots}/08_explore_cycle.png`, fullPage: true })
+
 await browser.close()
 if (failed) {
   console.error('e2e: на странице были ошибки')

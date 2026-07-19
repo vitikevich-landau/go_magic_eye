@@ -108,3 +108,35 @@ export interface Example {
   topic: string
   code: string
 }
+
+// ── странствие (сеансовый протокол, eye_session_version: 1) ──────────
+
+export interface TreeNodeDTO {
+  id: number
+  label: string
+  sub: string
+  expandable: boolean
+  refusal: string
+  cycle: number // id узла-оригинала; 0 — обычный узел
+  shared: boolean // true — разделяемая ссылка ≡, false при cycle>0 — цикл ⟲
+  copied: string
+}
+
+export interface ExploreResponse {
+  ok: boolean
+  diagnostics: Diagnostic[]
+  session?: string
+  roots?: TreeNodeDTO[]
+  stdout?: string
+  stderr?: string
+  error?: string
+  compile_ms: number
+}
+
+export interface ExploreCmdResponse {
+  ok: boolean
+  error?: string
+  nodes?: TreeNodeDTO[]
+  eye?: Envelope
+  stdout?: string
+}
