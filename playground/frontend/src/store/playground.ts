@@ -81,6 +81,10 @@ export const usePlayground = defineStore('playground', {
       if (!this.code.trim() || this.running) return
       this.running = true
       this.apiError = ''
+      // прошлый результат гасится сразу: сбой запроса (сеть, 429, 500) не
+      // должен оставить старую карту памяти под баннером ошибки — её легко
+      // принять за вывод нового кода
+      this.result = null
       try {
         const res = await runCode(this.code)
         this.result = res

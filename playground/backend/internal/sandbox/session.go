@@ -134,6 +134,7 @@ func (r *Runner) launchSession(prog, dir string, compileMS int64) (*Live, error)
 	if r.opts.Isolate {
 		argv = append([]string{"unshare", "-r", "-n"}, argv...)
 	}
+	argv = append(r.memLauncher(), argv...) // prlimit ДО exec снипетта
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = dir
 	cmd.Env = []string{
@@ -169,10 +170,13 @@ func (r *Runner) launchSession(prog, dir string, compileMS int64) (*Live, error)
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	if err := applyMemLimit(cmd.Process.Pid, int64(r.opts.HardMemMiB)<<20); err != nil {
-		killProcGroup(cmd)
-		cmd.Wait()
-		return nil, fmt.Errorf("prlimit: %w", err)
+	// пост-старт лимит — деградация без prlimit-обёртки (см. execute)
+	if len(r.memLauncher()) == 0 {
+		if err := applyMemLimit(cmd.Process.Pid, int64(r.opts.HardMemMiB)<<20); err != nil {
+			killProcGroup(cmd)
+			cmd.Wait()
+			return nil, fmt.Errorf("prlimit: %w", err)
+		}
 	}
 	go s.pump(stdout)
 	go func() {

@@ -47,8 +47,9 @@ type Options struct {
 
 // Runner — песочница с очередью: не больше Concurrency сборок разом.
 type Runner struct {
-	opts Options
-	sem  chan struct{}
+	opts        Options
+	sem         chan struct{}
+	prlimitPath string // путь к prlimit (util-linux), "" — нет: pre-exec недоступен
 
 	sessMu      sync.Mutex
 	sessions    map[string]*Live
@@ -102,7 +103,24 @@ func New(opts Options) *Runner {
 	if opts.HelloWait == 0 {
 		opts.HelloWait = defaultHelloWait
 	}
-	return &Runner{opts: opts, sem: make(chan struct{}, opts.Concurrency)}
+	r := &Runner{opts: opts, sem: make(chan struct{}, opts.Concurrency)}
+	if p, err := exec.LookPath("prlimit"); err == nil {
+		r.prlimitPath = p
+	}
+	return r
+}
+
+// memLauncher — pre-exec обёртка жёсткого лимита памяти: prlimit --as ставит
+// RLIMIT_AS и exec'ает цель, так что лимит действует ЕЩЁ ДО init/глобальных
+// аллокаций снипетта (RLIMIT_AS не отзывает уже созданные маппинги — вешать
+// его после Start() поздно). Комбинируется с unshare-префиксом. Возвращает
+// пустой срез, если лимит выключен или prlimit недоступен — тогда защиту
+// держит пост-стартовый applyMemLimit (ослабленный) и контейнер.
+func (r *Runner) memLauncher() []string {
+	if r.opts.HardMemMiB <= 0 || r.prlimitPath == "" {
+		return nil
+	}
+	return []string{r.prlimitPath, fmt.Sprintf("--as=%d", int64(r.opts.HardMemMiB)<<20), "--"}
 }
 
 // MaxCode — лимит размера снипетта (нужен API для MaxBytesReader).
@@ -330,6 +348,7 @@ func (r *Runner) execute(prog string) (RunResult, error) {
 		// -n: своя пустая сетевая ns — сети у снипетта нет
 		argv = append([]string{"unshare", "-r", "-n"}, argv...)
 	}
+	argv = append(r.memLauncher(), argv...) // prlimit ДО exec снипетта
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = filepath.Dir(prog)
 	cmd.Env = []string{
@@ -390,10 +409,15 @@ func (r *Runner) execute(prog string) (RunResult, error) {
 		// со смертью ребёнка (у того свой дубликат дескриптора)
 		envW.Close()
 	}
-	if err := applyMemLimit(cmd.Process.Pid, int64(r.opts.HardMemMiB)<<20); err != nil {
-		killProcGroup(cmd)
-		cmd.Wait()
-		return RunResult{}, fmt.Errorf("prlimit: %w", err)
+	// пост-старт лимит — ослабленная деградация: он опоздал бы к init/
+	// глобальным аллокациям, поэтому основной заслон ставит memLauncher
+	// (prlimit до exec). Ставим его только когда обёртки нет
+	if len(r.memLauncher()) == 0 {
+		if err := applyMemLimit(cmd.Process.Pid, int64(r.opts.HardMemMiB)<<20); err != nil {
+			killProcGroup(cmd)
+			cmd.Wait()
+			return RunResult{}, fmt.Errorf("prlimit: %w", err)
+		}
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()

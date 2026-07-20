@@ -323,6 +323,44 @@ func main() {
 	}
 }
 
+// Обжора в init() — до main — умирает об жёсткий потолок: pre-exec обёртка
+// (prlimit) ставит RLIMIT_AS ДО запуска кода, а не после Start(). Раньше
+// лимит вешался пост-старт и init мог создать маппинги в обход него.
+func TestRunInitAllocHitsHardLimit(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("prlimit/RLIMIT_AS — Linux")
+	}
+	if _, err := exec.LookPath("prlimit"); err != nil {
+		t.Skip("prlimit недоступен — pre-exec обёртки нет")
+	}
+	code := `package main
+
+import "fmt"
+
+// аллокация на этапе init: касаем страницы ДО main
+var hog = func() []byte {
+	b := make([]byte, 3<<30) // 3 ГиБ
+	for i := 0; i < len(b); i += 4096 {
+		b[i] = 1
+	}
+	return b
+}()
+
+func main() { fmt.Println(len(hog)) }
+`
+	r := New(Options{LibDir: libDir(t), RunTimeout: 15 * time.Second})
+	res, err := r.Run(context.Background(), code)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.TimedOut {
+		t.Fatal("обжора-init дожил до таймаута — pre-exec лимит не сработал")
+	}
+	if res.ExitCode == 0 {
+		t.Fatalf("обжора-init вышел чисто (stdout: %q) — лимит обойдён", res.Stdout)
+	}
+}
+
 // Фоновый ребёнок снипетта (exec…Start()) не переживает нормальный выход:
 // группа процессов добивается и без таймаута.
 func TestRunReapsBackgroundChildren(t *testing.T) {
