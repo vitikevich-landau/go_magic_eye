@@ -75,6 +75,22 @@ func TestRunHappyPath(t *testing.T) {
 	}
 }
 
+// fmt.Print без \n прямо перед Inspect: конверт всё равно извлекается,
+// печать остаётся в stdout (ревью Codex, третий заход).
+func TestRunUnterminatedPrintBeforeInspect(t *testing.T) {
+	code := "package main\n\nimport (\n\t\"fmt\"\n\n\teye \"github.com/vitikevich-landau/go_magic_eye\"\n)\n\nfunc main() {\n\tx := 42\n\tfmt.Print(\"progress: \")\n\teye.Inspect(&x, \"ответ\")\n}\n"
+	res, err := newRunner(t).Run(context.Background(), code)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Envelope == nil {
+		t.Fatalf("конверт не извлечён; stdout: %q", res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "progress:") {
+		t.Errorf("незавершённая печать пропала: %q", res.Stdout)
+	}
+}
+
 func TestCheckReportsPositions(t *testing.T) {
 	bad := "package main\n\nfunc main() {\n\tневедомая()\n}\n"
 	res, err := newRunner(t).Check(context.Background(), bad)

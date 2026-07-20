@@ -229,6 +229,9 @@ func TestSplitProtocol(t *testing.T) {
 		"склейка":           {`тик{"id":2,"ok":true}`, "тик", `{"id":2,"ok":true}`},
 		"склейка hello":     {`x{"eye_session_version":1,"roots":[]}`, "x", `{"eye_session_version":1,"roots":[]}`},
 		"json пользователя": {`{"my":"json"}`, `{"my":"json"}`, ""},
+		// структурный лог с id, но без ok — НЕ протокол: не должен украсть
+		// место ответа в Do
+		"лог с id": {`{"id":1}`, `{"id":1}`, ""},
 	} {
 		noise, proto := splitProtocol([]byte(tc.in))
 		if string(noise) != tc.noise || string(proto) != tc.proto {

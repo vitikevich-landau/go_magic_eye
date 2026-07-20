@@ -211,20 +211,24 @@ func splitProtocol(line []byte) (noise, protocol []byte) {
 	return line, nil
 }
 
-// isProtocolLine — строка сеансового протокола: JSON-объект с полем id
-// (ответ) или eye_session_version (hello).
+// isProtocolLine — строка сеансового протокола: hello (eye_session_version)
+// или ответ ФОРМЫ ответа — id вместе с ok. Одного id мало: пользовательский
+// структурный лог вида {"id":1} протоколом не является и обязан дойти до
+// stdout, а не украсть место ответа в Do. (Лог, нарочно совпавший с полной
+// формой {"id":N,"ok":…}, различить уже нечем — честная граница эвристики.)
 func isProtocolLine(line []byte) bool {
 	if len(line) == 0 || line[0] != '{' {
 		return false
 	}
 	var probe struct {
-		ID      *int `json:"id"`
-		Version *int `json:"eye_session_version"`
+		ID      *int  `json:"id"`
+		OK      *bool `json:"ok"`
+		Version *int  `json:"eye_session_version"`
 	}
 	if err := json.Unmarshal(line, &probe); err != nil {
 		return false
 	}
-	return probe.ID != nil || probe.Version != nil
+	return probe.Version != nil || (probe.ID != nil && probe.OK != nil)
 }
 
 // awaitHello — дождаться рукопожатия или честно объяснить, почему его нет.

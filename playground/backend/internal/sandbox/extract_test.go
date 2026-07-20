@@ -79,6 +79,24 @@ func TestExtractConsecutiveEnvelopes(t *testing.T) {
 	}
 }
 
+// Конверт, приклеенный к печати без \n (fmt.Print перед Inspect), находится
+// по сигнатуре MarshalIndent; печать уцелевает в остатке.
+func TestExtractGluedToUnterminatedPrint(t *testing.T) {
+	env, rest := ExtractEnvelopes([]byte("progress: " + envA))
+	if env == nil {
+		t.Fatal("приклеенный конверт не найден")
+	}
+	if n := modelCount(t, env); n != 1 {
+		t.Errorf("моделей %d, ожидалась 1", n)
+	}
+	if !strings.Contains(rest, "progress:") {
+		t.Errorf("незавершённая печать пропала: %q", rest)
+	}
+	if strings.Contains(rest, "eye_json_version") {
+		t.Errorf("конверт остался в stdout: %q", rest)
+	}
+}
+
 func TestExtractNoEnvelope(t *testing.T) {
 	env, rest := ExtractEnvelopes([]byte("просто текст\n"))
 	if env != nil || rest != "просто текст\n" {

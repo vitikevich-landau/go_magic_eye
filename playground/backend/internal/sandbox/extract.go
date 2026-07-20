@@ -5,6 +5,11 @@ import (
 	"encoding/json"
 )
 
+// envelopeMark — начало конверта, каким его печатает библиотека
+// (MarshalIndent с двумя пробелами): по нему находится конверт, даже
+// приклеенный к чужому хвосту без перевода строки.
+var envelopeMark = []byte("{\n  \"eye_json_version\"")
+
 // ExtractEnvelopes — выуживает из смешанного stdout программы конверты Ока
 // (их может быть несколько: каждый Inspect печатает свой) и сливает в один
 // {"eye_json_version":1,"models":[…]}. Остаток — пользовательский вывод
@@ -23,12 +28,17 @@ func ExtractEnvelopes(out []byte) (envelope []byte, rest string) {
 
 	for pos := 0; pos < len(out); {
 		// следующий кандидат: «{» прямо на текущей позиции (начало вывода
-		// или стык двух конвертов) либо первый «{» после перевода строки
+		// или стык двух конвертов), первый «{» после перевода строки, а
+		// также конверт, приклеенный к хвосту без \n (fmt.Print перед
+		// Inspect) — его выдаёт сигнатура отступного MarshalIndent
 		cand := -1
 		if out[pos] == '{' {
 			cand = pos
 		} else if i := bytes.Index(out[pos:], []byte("\n{")); i >= 0 {
 			cand = pos + i + 1
+		}
+		if i := bytes.Index(out[pos:], envelopeMark); i >= 0 && (cand < 0 || pos+i < cand) {
+			cand = pos + i
 		}
 		if cand < 0 {
 			restBuf.Write(out[pos:])

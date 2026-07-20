@@ -98,11 +98,14 @@ func emit(m *model.Model, cfg config) {
 func printJSON(models []*model.Model, cfg config) {
 	b, err := model.ToJSON(models)
 	if err != nil {
-		fmt.Fprintf(cfg.out, "{\"eye_json_version\":%d,\"error\":%q}\n", model.JSONVersion, err.Error())
+		fmt.Fprintf(cfg.out, "\n{\"eye_json_version\":%d,\"error\":%q}\n", model.JSONVersion, err.Error())
 		return
 	}
+	// конверт начинается с чистой строки: перед Inspect могла быть печать
+	// без завершающего \n (fmt.Print) — потребитель, режущий поток по
+	// строкам, не должен получить склейку «хвост{конверт}»
 	b = append(b, '\n')
-	cfg.out.Write(b)
+	cfg.out.Write(append([]byte("\n"), b...))
 }
 
 // printLines — вывод с центрированием (EYE_CENTER) по ширине экрана.
