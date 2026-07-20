@@ -112,9 +112,12 @@ func (r *Runner) StartSession(ctx context.Context, code string) (*Live, RunResul
 	}
 	if err := s.awaitHello(ctx); err != nil {
 		s.Close()
-		// паника/OOM до Explore уже пойманы в stderr — отдать их с отказом:
-		// голое «нет сеанса» не объясняет, ПОЧЕМУ странствие не началось
-		return nil, RunResult{Stderr: s.stderr.String(), CompileMS: compileMS}, err
+		// паника/OOM до Explore уже пойманы в stderr, а печать программы —
+		// в noise насоса: отдать ОБА с отказом, голое «нет сеанса» не
+		// объясняет, что успело случиться до несостоявшегося рукопожатия
+		return nil, RunResult{
+			Stdout: s.Noise(), Stderr: s.stderr.String(), CompileMS: compileMS,
+		}, err
 	}
 	// клиент мог отменить запрос ровно между hello и регистрацией:
 	// такой сеанс никто не получит и не закроет — не регистрируем

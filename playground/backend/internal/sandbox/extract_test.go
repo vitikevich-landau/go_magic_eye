@@ -143,6 +143,21 @@ func TestExtractGluedToUnterminatedPrint(t *testing.T) {
 	}
 }
 
+// Валидный ПУСТОЙ конверт (models: []) — находка, а не null: пустая галерея
+// в JSON-режиме законна, eye не должен превращаться в null.
+func TestExtractEmptyEnvelopeKept(t *testing.T) {
+	env, rest := ExtractEnvelopes([]byte(`{"eye_json_version":1,"models":[]}` + "\n"))
+	if env == nil {
+		t.Fatal("пустой конверт выброшен")
+	}
+	if n := modelCount(t, env); n != 0 {
+		t.Errorf("моделей %d, ожидался пустой конверт", n)
+	}
+	if strings.TrimSpace(rest) != "" {
+		t.Errorf("остаток не пуст: %q", rest)
+	}
+}
+
 func TestExtractNoEnvelope(t *testing.T) {
 	env, rest := ExtractEnvelopes([]byte("просто текст\n"))
 	if env != nil || rest != "просто текст\n" {

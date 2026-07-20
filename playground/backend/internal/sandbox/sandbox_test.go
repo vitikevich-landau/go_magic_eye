@@ -107,6 +107,26 @@ func TestCheckReportsPositions(t *testing.T) {
 	}
 }
 
+// stderr, напечатанный ДО таймаута, не затирается сообщением о нём:
+// диагностика программы доезжает, таймаут дописывается сверху.
+func TestRunTimeoutKeepsStderr(t *testing.T) {
+	r := New(Options{LibDir: libDir(t), RunTimeout: 500 * time.Millisecond})
+	code := "package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n\nfunc main() {\n\tfmt.Fprintln(os.Stderr, \"крик до зависания\")\n\tfor {\n\t}\n}\n"
+	res, err := r.Run(context.Background(), code)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !res.TimedOut {
+		t.Fatal("вечный цикл не помечен TimedOut")
+	}
+	if !strings.Contains(res.Stderr, "крик до зависания") {
+		t.Errorf("stderr до таймаута потерян: %q", res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "убита") {
+		t.Errorf("сообщение о таймауте пропало: %q", res.Stderr)
+	}
+}
+
 // Бесконечный цикл убивается по таймауту, а не вешает песочницу.
 func TestRunKillsInfiniteLoop(t *testing.T) {
 	r := New(Options{LibDir: libDir(t), RunTimeout: 500 * time.Millisecond})

@@ -116,7 +116,8 @@ func (s *Server) handleExplore(w http.ResponseWriter, r *http.Request) {
 		// паника/OOM до Explore — в stderr: причина отказа важнее самого отказа
 		writeJSON(w, http.StatusOK, exploreResponse{
 			OK: false, Diagnostics: []diag.Diag{},
-			Error: err.Error(), Stderr: res.Stderr, CompileMS: res.CompileMS,
+			Error: err.Error(), Stdout: res.Stdout, Stderr: res.Stderr,
+			CompileMS: res.CompileMS,
 		})
 		return
 	case err != nil:

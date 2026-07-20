@@ -406,7 +406,6 @@ func (r *Runner) execute(prog string) (RunResult, error) {
 		}
 	case <-time.After(r.opts.RunTimeout):
 		res.TimedOut = true
-		res.Stderr = fmt.Sprintf("⏱ программа убита: не уложилась в %s (бесконечный цикл?)", r.opts.RunTimeout)
 		killProcGroup(cmd)
 		<-done
 	}
@@ -435,8 +434,16 @@ func (r *Runner) execute(prog string) (RunResult, error) {
 		rest = strings.TrimPrefix(rest, "\n") // ровно наш стыковой перевод строки
 	}
 	res.Stdout = rest
-	if !res.TimedOut {
-		res.Stderr = stderrBuf.String()
+	// stderr отдаётся ВСЕГДА: программа могла успеть рассказать о беде до
+	// таймаута — сообщение о нём дописывается сверху, а не вместо
+	res.Stderr = stderrBuf.String()
+	if res.TimedOut {
+		msg := fmt.Sprintf("⏱ программа убита: не уложилась в %s (бесконечный цикл?)", r.opts.RunTimeout)
+		if strings.TrimSpace(res.Stderr) != "" {
+			res.Stderr = msg + "\n" + res.Stderr
+		} else {
+			res.Stderr = msg
+		}
 	}
 	return res, nil
 }

@@ -24,6 +24,7 @@ func ExtractEnvelopes(out []byte) (envelope []byte, rest string) {
 		Models  json.RawMessage `json:"models"`
 	}
 	var models []json.RawMessage
+	found := false // отдельный флаг: конверт с models: [] — валиден, но пуст
 	var restBuf bytes.Buffer
 
 	for pos := 0; pos < len(out); {
@@ -60,6 +61,7 @@ func ExtractEnvelopes(out []byte) (envelope []byte, rest string) {
 			prefix := out[pos:cand]
 			prefix = bytes.TrimSuffix(prefix, []byte("\n"))
 			restBuf.Write(prefix)
+			found = true
 			models = append(models, ms...)
 			pos = cand + int(dec.InputOffset())
 			// съесть перевод строки, оставшийся от печати конверта
@@ -73,8 +75,11 @@ func ExtractEnvelopes(out []byte) (envelope []byte, rest string) {
 		pos = cand + 1
 	}
 
-	if models == nil {
+	if !found {
 		return nil, restBuf.String()
+	}
+	if models == nil {
+		models = []json.RawMessage{} // пустая галерея: конверт есть, моделей ноль
 	}
 	merged, err := json.Marshal(struct {
 		Version int               `json:"eye_json_version"`

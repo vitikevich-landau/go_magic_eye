@@ -369,7 +369,7 @@ func main() {
 // сохраняется в RunResult — пользователь видит, почему сеанса нет.
 func TestSessionNoHelloCarriesStderr(t *testing.T) {
 	r := newRunner(t)
-	code := "package main\n\nfunc main() { panic(\"упал до странствия\") }\n"
+	code := "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"успел сказать\")\n\tpanic(\"упал до странствия\")\n}\n"
 	live, res, err := r.StartSession(context.Background(), code)
 	if err == nil {
 		live.Close()
@@ -380,6 +380,10 @@ func TestSessionNoHelloCarriesStderr(t *testing.T) {
 	}
 	if !strings.Contains(res.Stderr, "упал до странствия") {
 		t.Errorf("stderr с причиной паники потерян: %q", res.Stderr)
+	}
+	// печать до несостоявшегося рукопожатия тоже доезжает
+	if !strings.Contains(res.Stdout, "успел сказать") {
+		t.Errorf("stdout до рукопожатия потерян: %q", res.Stdout)
 	}
 }
 
