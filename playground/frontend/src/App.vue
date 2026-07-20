@@ -36,7 +36,15 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onUnload))
 // фоновая проверка компилятором: debounce после паузы в наборе
 let checkTimer: ReturnType<typeof setTimeout> | undefined
 function onCode(code: string) {
+  const changed = code !== pg.code
   pg.setCode(code)
+  // правка кода в странствии рвёт связь дерева с живой памятью: дерево
+  // описывало ПРОШЛЫЙ код. Гасим сеанс (и инвалидируем летящий start через
+  // поколение внутри stop) — как stale-guard'ы у run/check. Условие на
+  // changed бережёт от лишних stop при программной установке того же кода
+  if (changed && mode.value === 'explore' && (ex.session || ex.starting)) {
+    ex.stop()
+  }
   clearTimeout(checkTimer)
   checkTimer = setTimeout(() => pg.check(), 700)
 }

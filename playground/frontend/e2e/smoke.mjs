@@ -86,6 +86,16 @@ if ((await cycleBadge.count()) === 0) {
 }
 await page.screenshot({ path: `${shots}/08_explore_cycle.png`, fullPage: true })
 
+// правка кода в странствии рвёт связь дерева с живой памятью — дерево
+// должно исчезнуть (сеанс закрыт), сменившись подсказкой
+await page.locator('.monaco-editor textarea').fill('package main\n\nfunc main() {}\n')
+await page.waitForTimeout(300)
+if ((await page.locator('section:has-text("Странствие — прогулка")').count()) === 0) {
+  console.error('e2e: дерево не сброшено после правки кода в странствии')
+  failed = true
+}
+await page.screenshot({ path: `${shots}/09_explore_reset.png` })
+
 await browser.close()
 if (failed) {
   console.error('e2e: на странице были ошибки')

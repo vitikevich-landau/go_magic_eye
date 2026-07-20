@@ -158,6 +158,7 @@ type RunResult struct {
 	Stdout    string      `json:"stdout"` // вывод программы БЕЗ конвертов
 	Stderr    string      `json:"stderr"`
 	TimedOut  bool        `json:"timed_out"`
+	Canceled  bool        `json:"-"` // клиент прервал запрос — ответ читать некому
 	ExitCode  int         `json:"exit_code"` // код выхода (0 — чисто; смысла нет при timed_out)
 	CompileMS int64       `json:"compile_ms"`
 	RunMS     int64       `json:"run_ms"`
@@ -234,13 +235,13 @@ func (r *Runner) Run(ctx context.Context, code string) (RunResult, error) {
 	}
 
 	t1 := time.Now()
-	res, err := r.execute(prog)
+	res, err := r.execute(ctx, prog)
 	if err != nil {
 		// песочница не смогла ЗАПУСТИТЬ программу (сломанная обёртка,
 		// отказ prlimit) — это сбой сервиса, не результат снипетта
 		return RunResult{}, fmt.Errorf("запуск в песочнице: %w", err)
 	}
-	res.OK = !res.TimedOut
+	res.OK = !res.TimedOut && !res.Canceled
 	res.Diags = []diag.Diag{}
 	res.CompileMS = compileMS
 	res.RunMS = time.Since(t1).Milliseconds()
@@ -339,9 +340,9 @@ func diagsOrFallback(stderr string) []diag.Diag {
 
 // execute — запуск собранной программы с минимальным окружением, лимитами
 // памяти (мягкий GOMEMLIMIT + жёсткий RLIMIT_AS), обрезанием вывода и
-// убийством всей группы процессов по таймауту. error — программа НЕ
-// ЗАПУСТИЛАСЬ (это сбой песочницы, не результат снипетта).
-func (r *Runner) execute(prog string) (RunResult, error) {
+// убийством всей группы процессов по таймауту ИЛИ отмене запроса. error —
+// программа НЕ ЗАПУСТИЛАСЬ (это сбой песочницы, не результат снипетта).
+func (r *Runner) execute(ctx context.Context, prog string) (RunResult, error) {
 	argv := []string{prog}
 	if r.opts.Isolate {
 		// unshare -r: uid 0 внутри новой user-ns (иначе -n требует root);
@@ -430,6 +431,13 @@ func (r *Runner) execute(prog string) (RunResult, error) {
 		}
 	case <-time.After(r.opts.RunTimeout):
 		res.TimedOut = true
+		killProcGroup(cmd)
+		<-done
+	case <-ctx.Done():
+		// клиент ушёл (закрыл вкладку, прервал запрос): не ждём таймаута —
+		// убиваем процесс и освобождаем слот немедленно. Ответ читать
+		// некому, но группа и каталог не должны висеть до RunTimeout
+		res.Canceled = true
 		killProcGroup(cmd)
 		<-done
 	}

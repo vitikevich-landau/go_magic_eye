@@ -401,6 +401,32 @@ func assertNoProcess(t *testing.T, pattern string) {
 	}
 }
 
+// Отмена запроса клиентом (закрытая вкладка) убивает процесс НЕ дожидаясь
+// таймаута: слот и группа не висят до RunTimeout.
+func TestRunHonorsContextCancel(t *testing.T) {
+	// таймаут запуска большой — если бы отмена не работала, тест ждал бы его
+	r := New(Options{LibDir: libDir(t), RunTimeout: 30 * time.Second})
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(700 * time.Millisecond) // дать скомпилироваться и уйти в цикл
+		cancel()
+	}()
+	t0 := time.Now()
+	res, err := r.Run(ctx, "package main\n\nfunc main() { for {} }\n")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if took := time.Since(t0); took > 10*time.Second {
+		t.Fatalf("отмена не сработала: прогон занял %s (ждал таймаут?)", took)
+	}
+	if res.TimedOut {
+		t.Error("отменённый прогон помечен таймаутом, а не отменой")
+	}
+	if res.OK {
+		t.Error("отменённый прогон помечен OK")
+	}
+}
+
 // Сторонний модуль не собирается: GOPROXY=off отрезает мир.
 func TestRunForeignImportRejected(t *testing.T) {
 	code := "package main\n\nimport \"github.com/fatih/color\"\n\nfunc main() { color.Red(\"нет\") }\n"
