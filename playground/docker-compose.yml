@@ -16,9 +16,11 @@ services:
       EYE_PG_RUN_TIMEOUT: 5s
       EYE_PG_COMPILE_TIMEOUT: 30s
       EYE_PG_ISOLATE: auto
-    # снипетты собираются и живут в /tmp — быстрый tmpfs, чистится сам
+    # снипетты собираются и живут в /tmp — быстрый tmpfs, чистится сам.
+    # ВАЖНО: у Docker tmpfs по умолчанию noexec — без exec бинарь prog
+    # из /tmp/eye-run-* не стартует (fork/exec: permission denied → 500).
     tmpfs:
-      - /tmp:size=512m
+      - /tmp:size=512m,exec
     mem_limit: 1g
     pids_limit: 256
     init: true
