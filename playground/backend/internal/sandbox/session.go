@@ -275,7 +275,8 @@ func (s *Live) Do(cmd string, node int) (json.RawMessage, error) {
 	s.lastUsed = time.Now()
 
 	s.nextID++
-	req, _ := json.Marshal(map[string]any{"id": s.nextID, "cmd": cmd, "node": node})
+	id := s.nextID // локальная копия: сравнение не зависит от чужих инкрементов
+	req, _ := json.Marshal(map[string]any{"id": id, "cmd": cmd, "node": node})
 	req = append(req, '\n')
 	if _, err := s.stdin.Write(req); err != nil {
 		return nil, ErrSessionGone
@@ -291,7 +292,7 @@ func (s *Live) Do(cmd string, node int) (json.RawMessage, error) {
 			var probe struct {
 				ID int `json:"id"`
 			}
-			if json.Unmarshal(line, &probe) == nil && probe.ID == s.nextID {
+			if json.Unmarshal(line, &probe) == nil && probe.ID == id {
 				return json.RawMessage(line), nil
 			}
 			// чужой id (запоздалый ответ) — пропускаем
@@ -314,17 +315,25 @@ func (s *Live) Noise() string {
 // Close — вежливый quit, затем контрольное убийство группы и уборка.
 func (s *Live) Close() {
 	s.closeOnce.Do(func() {
+		// quit сериализуется с летящей командой через тот же мьютекс:
+		// иначе инкремент nextID под ногами у Do заставил бы её принять
+		// ответ quit за свой (или проигнорировать собственный)
+		s.mu.Lock()
 		if s.stdin != nil {
 			s.nextID++
 			req, _ := json.Marshal(map[string]any{"id": s.nextID, "cmd": "quit"})
 			s.stdin.Write(append(req, '\n'))
 		}
+		s.mu.Unlock()
 		select {
 		case <-s.dead:
 		case <-time.After(time.Second):
 			killProcGroup(s.cmd)
-			<-s.dead
 		}
+		// группа добивается и при ЧИСТОМ выходе: код странствия мог
+		// оставить фоновых детей — им не место после смерти сеанса
+		killProcGroup(s.cmd)
+		<-s.dead
 		os.RemoveAll(s.dir)
 		s.runner.unregisterSession(s.ID)
 	})

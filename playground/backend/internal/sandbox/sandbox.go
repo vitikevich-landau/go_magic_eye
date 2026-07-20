@@ -272,11 +272,15 @@ func (r *Runner) execute(prog string) RunResult {
 			_ = err
 		}
 	case <-time.After(r.opts.RunTimeout):
-		killProcGroup(cmd)
-		<-done
 		res.TimedOut = true
 		res.Stderr = fmt.Sprintf("⏱ программа убита: не уложилась в %s (бесконечный цикл?)", r.opts.RunTimeout)
+		killProcGroup(cmd)
+		<-done
 	}
+	// группа добивается и при НОРМАЛЬНОМ выходе: снипетт мог оставить
+	// фоновых детей (exec.Command(…).Start()), которые иначе пережили бы
+	// уборку каталога и копились от запуска к запуску
+	killProcGroup(cmd)
 
 	env, rest := ExtractEnvelopes(stdout.Bytes())
 	res.Envelope = env

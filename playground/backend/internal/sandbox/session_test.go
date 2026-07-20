@@ -249,6 +249,67 @@ func main() {
 	}
 }
 
+// Фоновый ребёнок, рождённый кодом странствия, не переживает чистый Close.
+func TestSessionCloseReapsChildren(t *testing.T) {
+	requirePgrep(t)
+	const magic = "31338"
+	code := `package main
+
+import (
+	"os/exec"
+
+	eye "github.com/vitikevich-landau/go_magic_eye"
+)
+
+func main() {
+	exec.Command("sleep", "` + magic + `").Start()
+	x := 1
+	eye.Explore(&x, "ответ")
+}
+`
+	r := newRunner(t)
+	live, res, err := r.StartSession(context.Background(), code)
+	if err != nil || !res.OK {
+		t.Fatalf("StartSession: %v / %+v", err, res)
+	}
+	live.Close()
+	assertNoProcess(t, "sleep "+magic)
+}
+
+// Close посреди летящей команды не крадёт у неё ответ и не виснет:
+// quit сериализован тем же мьютексом, id команды — локальная копия.
+func TestCloseDuringInflightCommand(t *testing.T) {
+	r := newRunner(t)
+	live := startSession(t, r)
+	var roots []map[string]any
+	if err := json.Unmarshal(live.Roots, &roots); err != nil {
+		t.Fatal(err)
+	}
+	rootID := int(roots[0]["id"].(float64))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// любой исход законен (ответ или ErrSessionGone) — лишь бы не
+		// зависнуть и не перепутать ответы
+		if raw, err := live.Do("detail", rootID); err == nil {
+			var resp struct {
+				OK  bool            `json:"ok"`
+				Eye json.RawMessage `json:"eye"`
+			}
+			if json.Unmarshal(raw, &resp) == nil && resp.OK && resp.Eye == nil {
+				t.Error("Do принял чужой ответ (ok без eye — похоже на quit)")
+			}
+		}
+	}()
+	live.Close()
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("Do завис после конкурентного Close")
+	}
+}
+
 func TestSplitProtocol(t *testing.T) {
 	for name, tc := range map[string]struct {
 		in           string

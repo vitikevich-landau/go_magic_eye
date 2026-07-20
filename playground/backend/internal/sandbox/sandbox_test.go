@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -118,6 +119,46 @@ func TestRunKillsInfiniteLoop(t *testing.T) {
 	}
 	if took := time.Since(t0); took > 15*time.Second {
 		t.Errorf("убийство заняло %s", took)
+	}
+}
+
+// Фоновый ребёнок снипетта (exec…Start()) не переживает нормальный выход:
+// группа процессов добивается и без таймаута.
+func TestRunReapsBackgroundChildren(t *testing.T) {
+	requirePgrep(t)
+	const magic = "31337"
+	code := "package main\n\nimport (\n\t\"os/exec\"\n\n\teye \"github.com/vitikevich-landau/go_magic_eye\"\n)\n\nfunc main() {\n\texec.Command(\"sleep\", \"" + magic + "\").Start()\n\tx := 1\n\teye.Inspect(&x)\n}\n"
+	res, err := newRunner(t).Run(context.Background(), code)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("прогон не удался: stderr %q", res.Stderr)
+	}
+	assertNoProcess(t, "sleep "+magic)
+}
+
+func requirePgrep(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("pgrep"); err != nil {
+		t.Skip("pgrep недоступен — проверку утечки детей пропускаем")
+	}
+}
+
+// assertNoProcess — процесса с такой командной строкой не осталось
+// (SIGKILL группе доставляется мгновенно, но даём планировщику вздохнуть).
+func assertNoProcess(t *testing.T, pattern string) {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		if err := exec.Command("pgrep", "-f", pattern).Run(); err != nil {
+			return // не найден — утечки нет
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("фоновый процесс %q пережил уборку", pattern)
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
 }
 
