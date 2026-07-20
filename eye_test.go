@@ -182,6 +182,39 @@ func TestEnvJSONFDRedirect(t *testing.T) {
 	jsonEnvelope(t, strings.TrimSpace(string(buf[:n])))
 }
 
+// readEnvelopes — фоновый читатель пайпа: копит, пока не увидит want
+// конвертов, и отдаёт накопленное. Читать нужно ПАРАЛЛЕЛЬНО писателям:
+// пайпы Windows синхронные и с крошечным буфером — читатель «после»
+// заблокировал бы писателей насмерть (CI это честно показал).
+func readEnvelopes(r *os.File, want int) <-chan string {
+	out := make(chan string, 1)
+	go func() {
+		got := ""
+		buf := make([]byte, 64*1024)
+		for strings.Count(got, "eye_json_version") < want {
+			n, err := r.Read(buf)
+			got += string(buf[:n])
+			if err != nil {
+				break
+			}
+		}
+		out <- got
+	}()
+	return out
+}
+
+func awaitEnvelopes(t *testing.T, ch <-chan string, want int) {
+	t.Helper()
+	select {
+	case got := <-ch:
+		if n := strings.Count(got, "eye_json_version"); n != want {
+			t.Fatalf("конвертов %d, ожидалось %d:\n%.300q", n, want, got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("конверты так и не дошли по каналу fd")
+	}
+}
+
 // Дескриптор конвертов переживает GC: одноразовая обёртка os.NewFile
 // после сборки мусора закрыла бы fd финализатором, и второй Inspect молча
 // падал бы в фолбэк — кэш jsonFDs держит обёртку живой.
@@ -194,6 +227,7 @@ func TestEnvJSONFDSurvivesGC(t *testing.T) {
 	defer w.Close()
 	t.Setenv("EYE_FORMAT", "json")
 	t.Setenv("EYE_JSON_FD", fmt.Sprint(w.Fd()))
+	ch := readEnvelopes(r, 2)
 
 	var b strings.Builder
 	eye.Finspect(&b, 1, eye.WithLabel("первый"))
@@ -204,17 +238,7 @@ func TestEnvJSONFDSurvivesGC(t *testing.T) {
 	if b.String() != "" {
 		t.Fatalf("после GC конверт упал в фолбэк: %.120q", b.String())
 	}
-	got := ""
-	buf := make([]byte, 64*1024)
-	deadline := time.Now().Add(3 * time.Second)
-	for strings.Count(got, "eye_json_version") < 2 {
-		r.SetReadDeadline(deadline)
-		n, rerr := r.Read(buf)
-		got += string(buf[:n])
-		if rerr != nil {
-			t.Fatalf("дочитать оба конверта не вышло: %v\nполучено: %.200q", rerr, got)
-		}
-	}
+	awaitEnvelopes(t, ch, 2)
 }
 
 // Конкурентные Inspect'ы не плодят обёрток одного fd: гонка LoadOrStore
@@ -231,6 +255,7 @@ func TestEnvJSONFDConcurrentInspects(t *testing.T) {
 	t.Setenv("EYE_JSON_FD", fmt.Sprint(w.Fd()))
 
 	const n = 8
+	ch := readEnvelopes(r, n) // читатель ДО писателей: пайп не резиновый
 	var wg sync.WaitGroup
 	for i := range n {
 		wg.Add(1)
@@ -246,18 +271,7 @@ func TestEnvJSONFDConcurrentInspects(t *testing.T) {
 	wg.Wait()
 	runtime.GC()
 	runtime.GC()
-
-	got := ""
-	buf := make([]byte, 256*1024)
-	deadline := time.Now().Add(3 * time.Second)
-	for strings.Count(got, "eye_json_version") < n {
-		r.SetReadDeadline(deadline)
-		nn, rerr := r.Read(buf)
-		got += string(buf[:nn])
-		if rerr != nil {
-			t.Fatalf("дошло %d конвертов из %d: %v", strings.Count(got, "eye_json_version"), n, rerr)
-		}
-	}
+	awaitEnvelopes(t, ch, n)
 }
 
 func TestWithFormatBeatsEnv(t *testing.T) {
