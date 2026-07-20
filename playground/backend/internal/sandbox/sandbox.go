@@ -158,7 +158,7 @@ type RunResult struct {
 	Stdout    string      `json:"stdout"` // вывод программы БЕЗ конвертов
 	Stderr    string      `json:"stderr"`
 	TimedOut  bool        `json:"timed_out"`
-	Canceled  bool        `json:"-"` // клиент прервал запрос — ответ читать некому
+	Canceled  bool        `json:"-"`         // клиент прервал запрос — ответ читать некому
 	ExitCode  int         `json:"exit_code"` // код выхода (0 — чисто; смысла нет при timed_out)
 	CompileMS int64       `json:"compile_ms"`
 	RunMS     int64       `json:"run_ms"`
