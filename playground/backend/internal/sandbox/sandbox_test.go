@@ -123,6 +123,24 @@ func TestRunKillsInfiniteLoop(t *testing.T) {
 	}
 }
 
+// Путь библиотеки с ПРОБЕЛОМ не валит go.mod снипетта: replace в кавычках.
+func TestRunLibDirWithSpaces(t *testing.T) {
+	spaced := filepath.Join(t.TempDir(), "magic eye")
+	if err := os.Symlink(libDir(t), spaced); err != nil {
+		t.Skipf("символьная ссылка не создалась: %v", err)
+	}
+	res, err := New(Options{LibDir: spaced}).Run(context.Background(), okSnippet)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("снипетт не собрался с пробельным LibDir: %+v (stderr: %s)", res.Diags, res.Stderr)
+	}
+	if res.Envelope == nil {
+		t.Fatal("конверт не извлечён")
+	}
+}
+
 // Обжора памяти умирает об жёсткий потолок (RLIMIT_AS), не съев хост:
 // GOMEMLIMIT — лишь цель GC, настоящий заслон — prlimit (linux-only).
 func TestRunMemoryHogHitsHardLimit(t *testing.T) {

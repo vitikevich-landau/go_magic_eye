@@ -213,8 +213,11 @@ func (r *Runner) workdir(code string) (dir string, cleanup func(), err error) {
 		return "", nil, err
 	}
 	cleanup = func() { os.RemoveAll(dir) }
+	// путь в replace всегда в кавычках (%q): пробел в каталоге (EYE_PG_LIB,
+	// «Magic Eye/…») иначе рассыпал бы директиву на токены и валил парсинг
+	// go.mod ещё до компиляции
 	gomod := fmt.Sprintf(
-		"module snippet\n\ngo 1.22\n\nrequire github.com/vitikevich-landau/go_magic_eye v0.0.0\n\nreplace github.com/vitikevich-landau/go_magic_eye => %s\n",
+		"module snippet\n\ngo 1.22\n\nrequire github.com/vitikevich-landau/go_magic_eye v0.0.0\n\nreplace github.com/vitikevich-landau/go_magic_eye => %q\n",
 		r.opts.LibDir)
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(code), 0o644); err == nil {
 		err = os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod), 0o644)
