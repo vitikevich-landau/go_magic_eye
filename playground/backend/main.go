@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -44,6 +45,7 @@ func main() {
 		LibDir:         libDir,
 		CompileTimeout: envDuration("EYE_PG_COMPILE_TIMEOUT", 30*time.Second),
 		RunTimeout:     envDuration("EYE_PG_RUN_TIMEOUT", 5*time.Second),
+		HardMemMiB:     envInt("EYE_PG_MEM_HARD_MIB", 0), // 0 → умолчание песочницы (1024)
 		Isolate:        isolate,
 	})
 
@@ -115,9 +117,14 @@ func mustGetwd() string {
 // decideIsolation — on/off буквально; auto (и пусто) — пробуем unshare один
 // раз: в контейнерах user namespaces часто запрещены, тогда честно едем без
 // сетевой изоляции (GOPROXY=off всё равно не даст ничего скачать на сборке).
+// Форсированный on проверяется тут же: сломанная обёртка на старте сервера —
+// внятная ошибка конфигурации, а не «успешные» прогоны с пустым выводом.
 func decideIsolation(mode string) bool {
 	switch strings.ToLower(mode) {
 	case "on", "1", "true":
+		if !sandbox.ProbeIsolation() {
+			log.Fatal("EYE_PG_ISOLATE=on, но unshare -r -n здесь не работает — почини окружение или поставь auto/off")
+		}
 		return true
 	case "off", "0", "false":
 		return false
@@ -127,6 +134,15 @@ func decideIsolation(mode string) bool {
 		log.Print("unshare недоступен — снипетты бегут без сетевой изоляции")
 	}
 	return ok
+}
+
+func envInt(name string, def int) int {
+	if v := os.Getenv(name); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
 }
 
 func envDuration(name string, def time.Duration) time.Duration {

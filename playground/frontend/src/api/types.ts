@@ -98,6 +98,7 @@ export interface RunResponse {
   stdout: string
   stderr: string
   timed_out: boolean
+  exit_code: number // 0 — чисто; смысла нет при timed_out
   compile_ms: number
   run_ms: number
 }

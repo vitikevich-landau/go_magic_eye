@@ -73,7 +73,10 @@ func TestRunEndpointHappyPath(t *testing.T) {
 	}
 	eye, isMap := m["eye"].(map[string]any)
 	if !isMap {
-		t.Fatalf("eye = %v, ожидался конверт", m["eye"])
+		// диагностика на случай флейка под давлением памяти (пакеты тестов
+		// бегут параллельно): чей это был сбой — виден по коду и stderr
+		t.Fatalf("eye = %v, ожидался конверт (exit_code=%v, stderr=%q, stdout=%q)",
+			m["eye"], m["exit_code"], m["stderr"], m["stdout"])
 	}
 	if eye["eye_json_version"].(float64) != 1 {
 		t.Errorf("версия конверта: %v", eye["eye_json_version"])

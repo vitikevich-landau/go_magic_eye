@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -192,19 +193,27 @@ func TestSessionMaxConcurrent(t *testing.T) {
 	r := New(Options{LibDir: libDir(t), SessionMax: 1})
 	const n = 4
 	results := make(chan *Live, n)
+	errs := make(chan error, n)
 	var wg sync.WaitGroup
 	for range n {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			live, _, err := r.StartSession(context.Background(), exploreSnippet)
-			if err == nil {
-				results <- live
+			live, res, err := r.StartSession(context.Background(), exploreSnippet)
+			if err != nil {
+				errs <- err
+				return
 			}
+			if live == nil {
+				errs <- fmt.Errorf("нет ошибки, но нет и сеанса: %+v", res)
+				return
+			}
+			results <- live
 		}()
 	}
 	wg.Wait()
 	close(results)
+	close(errs)
 	var started []*Live
 	for live := range results {
 		started = append(started, live)
@@ -213,7 +222,12 @@ func TestSessionMaxConcurrent(t *testing.T) {
 		defer live.Close()
 	}
 	if len(started) != 1 {
-		t.Fatalf("сквозь SessionMax=1 прошло %d сеансов", len(started))
+		var all []string
+		for err := range errs {
+			all = append(all, err.Error())
+		}
+		t.Fatalf("сквозь SessionMax=1 прошло %d сеансов; отказы: %s",
+			len(started), strings.Join(all, " | "))
 	}
 }
 

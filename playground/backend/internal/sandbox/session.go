@@ -161,6 +161,11 @@ func (r *Runner) launchSession(prog, dir string, compileMS int64) (*Live, error)
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
+	if err := applyMemLimit(cmd.Process.Pid, int64(r.opts.HardMemMiB)<<20); err != nil {
+		killProcGroup(cmd)
+		cmd.Wait()
+		return nil, fmt.Errorf("prlimit: %w", err)
+	}
 	go s.pump(stdout)
 	go func() {
 		cmd.Wait()

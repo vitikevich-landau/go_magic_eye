@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -119,6 +120,41 @@ func TestRunKillsInfiniteLoop(t *testing.T) {
 	}
 	if took := time.Since(t0); took > 15*time.Second {
 		t.Errorf("убийство заняло %s", took)
+	}
+}
+
+// Обжора памяти умирает об жёсткий потолок (RLIMIT_AS), не съев хост:
+// GOMEMLIMIT — лишь цель GC, настоящий заслон — prlimit (linux-only).
+func TestRunMemoryHogHitsHardLimit(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("prlimit на чужой процесс есть только на Linux")
+	}
+	code := `package main
+
+import "fmt"
+
+func main() {
+	hog := make([][]byte, 0)
+	for i := 0; i < 4096; i++ { // 4 ГиБ с касанием страниц
+		b := make([]byte, 1<<20)
+		for j := 0; j < len(b); j += 4096 {
+			b[j] = 1
+		}
+		hog = append(hog, b)
+	}
+	fmt.Println(len(hog)) // не должно напечататься
+}
+`
+	r := New(Options{LibDir: libDir(t), RunTimeout: 15 * time.Second})
+	res, err := r.Run(context.Background(), code)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.TimedOut {
+		t.Fatal("обжора дожил до таймаута — жёсткий потолок памяти не сработал")
+	}
+	if res.ExitCode == 0 {
+		t.Fatalf("обжора вышел чисто (stdout: %q) — потолок не сработал", res.Stdout)
 	}
 }
 

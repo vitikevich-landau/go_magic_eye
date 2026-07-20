@@ -28,7 +28,8 @@ type Options struct {
 	RunTimeout     time.Duration // 5 с
 	MaxOutput      int64         // 4 МиБ на каждый из stdout/stderr
 	MaxCode        int64         // 128 КиБ на снипетт
-	MemLimit       string        // GOMEMLIMIT запущенной программы
+	MemLimit       string        // GOMEMLIMIT запущенной программы (мягкая цель GC)
+	HardMemMiB     int           // RLIMIT_AS снипетта, МиБ (1024; -1 — выключить)
 	Concurrency    int           // одновременных сборок (NumCPU)
 	QueueWait      time.Duration // ожидание места в очереди до ErrBusy (15 с)
 	Isolate        bool          // оборачивать запуск в unshare -rn (без сети)
@@ -71,6 +72,14 @@ func New(opts Options) *Runner {
 	}
 	if opts.MemLimit == "" {
 		opts.MemLimit = "256MiB"
+	}
+	if opts.HardMemMiB == 0 {
+		// Go-рантайм резервирует сотни МиБ адресного пространства уже на
+		// старте (замер: снипетту нужно 512–768 МиБ, и цифра плавает с
+		// числом потоков) — потолок берётся с двойным запасом: 2 ГиБ всё
+		// ещё настоящий заслон против безразмерного обжорства, но не
+		// роняет честные снипетты на границе резервов рантайма
+		opts.HardMemMiB = 2048
 	}
 	if opts.Concurrency == 0 {
 		opts.Concurrency = runtime.NumCPU()
@@ -128,6 +137,7 @@ type RunResult struct {
 	Stdout    string      `json:"stdout"` // вывод программы БЕЗ конвертов
 	Stderr    string      `json:"stderr"`
 	TimedOut  bool        `json:"timed_out"`
+	ExitCode  int         `json:"exit_code"` // код выхода (0 — чисто; смысла нет при timed_out)
 	CompileMS int64       `json:"compile_ms"`
 	RunMS     int64       `json:"run_ms"`
 }
@@ -179,7 +189,12 @@ func (r *Runner) Run(ctx context.Context, code string) (RunResult, error) {
 	}
 
 	t1 := time.Now()
-	res := r.execute(prog)
+	res, err := r.execute(prog)
+	if err != nil {
+		// песочница не смогла ЗАПУСТИТЬ программу (сломанная обёртка,
+		// отказ prlimit) — это сбой сервиса, не результат снипетта
+		return RunResult{}, fmt.Errorf("запуск в песочнице: %w", err)
+	}
 	res.OK = !res.TimedOut
 	res.Diags = []diag.Diag{}
 	res.CompileMS = compileMS
@@ -233,9 +248,11 @@ func (r *Runner) compile(ctx context.Context, dir string) (prog, stderr string, 
 	return prog, "", nil
 }
 
-// execute — запуск собранной программы с минимальным окружением, лимитом
-// памяти, обрезанием вывода и убийством всей группы процессов по таймауту.
-func (r *Runner) execute(prog string) RunResult {
+// execute — запуск собранной программы с минимальным окружением, лимитами
+// памяти (мягкий GOMEMLIMIT + жёсткий RLIMIT_AS), обрезанием вывода и
+// убийством всей группы процессов по таймауту. error — программа НЕ
+// ЗАПУСТИЛАСЬ (это сбой песочницы, не результат снипетта).
+func (r *Runner) execute(prog string) (RunResult, error) {
 	argv := []string{prog}
 	if r.opts.Isolate {
 		// unshare -r: uid 0 внутри новой user-ns (иначе -n требует root);
@@ -259,16 +276,20 @@ func (r *Runner) execute(prog string) RunResult {
 
 	res := RunResult{}
 	if err := cmd.Start(); err != nil {
-		res.Stderr = "песочница: " + err.Error()
-		return res
+		return RunResult{}, err
+	}
+	if err := applyMemLimit(cmd.Process.Pid, int64(r.opts.HardMemMiB)<<20); err != nil {
+		killProcGroup(cmd)
+		cmd.Wait()
+		return RunResult{}, fmt.Errorf("prlimit: %w", err)
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	select {
 	case err := <-done:
 		if err != nil {
-			// ненулевой выход (паника и т.п.) — законный учебный результат,
-			// он уже виден в stderr; отдельно не помечаем
+			// ненулевой выход (паника, out of memory об RLIMIT_AS) — законный
+			// учебный результат: код выхода уйдёт в ExitCode, беда — в stderr
 			_ = err
 		}
 	case <-time.After(r.opts.RunTimeout):
@@ -282,13 +303,16 @@ func (r *Runner) execute(prog string) RunResult {
 	// уборку каталога и копились от запуска к запуску
 	killProcGroup(cmd)
 
+	if st := cmd.ProcessState; st != nil {
+		res.ExitCode = st.ExitCode()
+	}
 	env, rest := ExtractEnvelopes(stdout.Bytes())
 	res.Envelope = env
 	res.Stdout = rest
 	if !res.TimedOut {
 		res.Stderr = stderrBuf.String()
 	}
-	return res
+	return res, nil
 }
 
 // capBuffer — писатель с потолком: хвост сверх лимита молча отбрасывается,
