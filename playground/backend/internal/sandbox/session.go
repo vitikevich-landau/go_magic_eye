@@ -476,10 +476,20 @@ func (r *Runner) reapLoop() {
 		tick = reapTick
 	}
 	for range time.Tick(tick) {
+		// снимок указателей под r.sessMu — микросекунды, БЕЗ вложенного
+		// s.mu: иначе жнец, ждущий s.mu летящей команды (Do держит его до
+		// sessionCmdWait), заморозил бы весь реестр — Session()/register
+		// других сеансов встали бы в очередь за r.sessMu (head-of-line)
 		r.sessMu.Lock()
-		var doomed []*Live
-		now := time.Now()
+		snap := make([]*Live, 0, len(r.sessions))
 		for _, s := range r.sessions {
+			snap = append(snap, s)
+		}
+		r.sessMu.Unlock()
+
+		now := time.Now()
+		var doomed []*Live
+		for _, s := range snap {
 			s.mu.Lock()
 			idle := now.Sub(s.lastUsed)
 			age := now.Sub(s.born)
@@ -488,7 +498,6 @@ func (r *Runner) reapLoop() {
 				doomed = append(doomed, s)
 			}
 		}
-		r.sessMu.Unlock()
 		for _, s := range doomed {
 			s.Close() // сам вычеркнет себя из реестра
 		}

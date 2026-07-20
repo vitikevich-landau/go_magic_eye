@@ -98,6 +98,10 @@ export const useExplore = defineStore('explore', {
       this.rootIds = []
       this.selectedId = 0
       this.detail = null
+      // сбрасываем и флаг загрузки: иначе detail-запрос, летящий в момент
+      // stop(), отсекается стражем session в select() и НЕ доходит до
+      // finally-сброса — панель осталась бы с вечным «…смотрю»
+      this.detailLoading = false
       this.stdoutLog = ''
       this.error = ''
       this.starting = false

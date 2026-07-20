@@ -154,4 +154,19 @@ describe('гонка устаревшего detail', () => {
     expect(ex.detail?.label).toBe('второй')
     expect(ex.detailLoading).toBe(false)
   })
+
+  // stop() во время летящего detail-запроса не оставляет вечный спиннер:
+  // ответ отсекается стражем session и не доходит до finally-сброса
+  it('stop() гасит detailLoading летящего detail', async () => {
+    const ex = useExplore()
+    ex.session = 's'
+    ex.ingest([node(1, 'узел')], null)
+
+    ;(exploreCmd as Mock).mockReturnValueOnce(new Promise(() => {})) // никогда
+    void ex.select(1)
+    expect(ex.detailLoading).toBe(true)
+
+    ex.stop() // ушли из странствия, пока detail летел
+    expect(ex.detailLoading).toBe(false)
+  })
 })
