@@ -123,6 +123,34 @@ func TestRunKillsInfiniteLoop(t *testing.T) {
 	}
 }
 
+// «package foo» — частая опечатка: go build успешно пишет АРХИВ, не бинарь,
+// и раньше запуск падал сбоем песочницы (500). Теперь — диагностика с
+// позицией, единая для check/run/explore.
+func TestRunNotMainPackage(t *testing.T) {
+	r := newRunner(t)
+	code := "package foo\n\nfunc main() {}\n"
+
+	check, err := r.Check(context.Background(), code)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if check.OK || len(check.Diags) == 0 {
+		t.Fatalf("check пропустил package foo: %+v", check)
+	}
+
+	res, err := r.Run(context.Background(), code)
+	if err != nil {
+		t.Fatalf("Run вернул сбой песочницы вместо диагностики: %v", err)
+	}
+	if res.OK || len(res.Diags) == 0 {
+		t.Fatalf("run пропустил package foo: %+v", res)
+	}
+	d := res.Diags[0]
+	if d.Line != 1 || !strings.Contains(d.Message, "package main") {
+		t.Errorf("диагностика не о package main или без позиции: %+v", d)
+	}
+}
+
 // Путь библиотеки с ПРОБЕЛОМ не валит go.mod снипетта: replace в кавычках.
 func TestRunLibDirWithSpaces(t *testing.T) {
 	spaced := filepath.Join(t.TempDir(), "magic eye")

@@ -75,6 +75,9 @@ type Live struct {
 // как err=nil + res.OK=false с диагностиками (как у Run); ErrNoSession —
 // программа вышла, не поздоровавшись.
 func (r *Runner) StartSession(ctx context.Context, code string) (*Live, RunResult, error) {
+	if d := notMainDiag(code); d != nil {
+		return nil, RunResult{OK: false, Diags: []diag.Diag{*d}}, nil
+	}
 	release, err := r.acquire(ctx)
 	if err != nil {
 		return nil, RunResult{}, err

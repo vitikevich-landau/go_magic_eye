@@ -6,6 +6,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -187,8 +188,12 @@ func (s *Server) handleExploreClose(w http.ResponseWriter, r *http.Request) {
 }
 
 // readCode — тело запроса с лимитом размера снипетта; false — ответ уже ушёл.
+// Лимит меряется по ДЕКОДИРОВАННОМУ коду: JSON-обёртка и экранирование
+// (\n, кавычки, \uXXXX) раздувают тело, и потолок на всё тело отвергал бы
+// снипетты, которые песочница честно принимает. Тело ограничено кратно —
+// только как страховка от мусорных мегабайтов.
 func (s *Server) readCode(w http.ResponseWriter, r *http.Request) (string, bool) {
-	body := http.MaxBytesReader(w, r.Body, s.runner.MaxCode())
+	body := http.MaxBytesReader(w, r.Body, 4*s.runner.MaxCode()+4096)
 	var req codeRequest
 	if err := json.NewDecoder(body).Decode(&req); err != nil {
 		var tooBig *http.MaxBytesError
@@ -201,6 +206,11 @@ func (s *Server) readCode(w http.ResponseWriter, r *http.Request) (string, bool)
 	}
 	if req.Code == "" {
 		writeError(w, http.StatusBadRequest, "пустой снипетт")
+		return "", false
+	}
+	if int64(len(req.Code)) > s.runner.MaxCode() {
+		writeError(w, http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("снипетт больше %d КиБ", s.runner.MaxCode()>>10))
 		return "", false
 	}
 	return req.Code, true

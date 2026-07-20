@@ -10,6 +10,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -142,8 +144,29 @@ type RunResult struct {
 	RunMS     int64       `json:"run_ms"`
 }
 
+// notMainDiag — снипетт не package main: честная диагностика с позицией
+// вместо попытки запустить архив (go build -o для не-main пакета успешно
+// пишет объект, не бинарь — компилятор тут не заругается, а запуск упал бы
+// сбоем песочницы). Синтаксический мусор не наш случай: его в полный рост
+// обругает настоящий компилятор.
+func notMainDiag(code string) *diag.Diag {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "main.go", code, parser.PackageClauseOnly)
+	if err != nil || f.Name == nil || f.Name.Name == "main" {
+		return nil
+	}
+	pos := fset.Position(f.Name.Pos())
+	return &diag.Diag{
+		Line: pos.Line, Col: pos.Column, Severity: "error",
+		Message: fmt.Sprintf("снипетт должен быть package main — package %s не собирается в программу", f.Name.Name),
+	}
+}
+
 // Check — только компиляция: диагностики для маркеров редактора.
 func (r *Runner) Check(ctx context.Context, code string) (CheckResult, error) {
+	if d := notMainDiag(code); d != nil {
+		return CheckResult{OK: false, Diags: []diag.Diag{*d}}, nil
+	}
 	release, err := r.acquire(ctx)
 	if err != nil {
 		return CheckResult{}, err
@@ -166,6 +189,9 @@ func (r *Runner) Check(ctx context.Context, code string) (CheckResult, error) {
 // Run — компиляция и запуск. Ошибка компиляции — не error: она законный
 // результат с диагностиками. error — только сбой самой песочницы.
 func (r *Runner) Run(ctx context.Context, code string) (RunResult, error) {
+	if d := notMainDiag(code); d != nil {
+		return RunResult{OK: false, Diags: []diag.Diag{*d}}, nil
+	}
 	release, err := r.acquire(ctx)
 	if err != nil {
 		return RunResult{}, err

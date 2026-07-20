@@ -102,6 +102,32 @@ func TestBadRequests(t *testing.T) {
 	}
 }
 
+// Лимит меряется по декодированному коду: JSON-экранирование (\n → \\n)
+// раздувает тело, и снипетт у самого потолка не должен ловить 413.
+func TestCodeLimitOnDecodedCode(t *testing.T) {
+	wd, _ := os.Getwd()
+	lib, _ := filepath.Abs(filepath.Join(wd, "..", "..", "..", ".."))
+	srv := httptest.NewServer(New(sandbox.New(sandbox.Options{LibDir: lib, MaxCode: 1024}), nil))
+	t.Cleanup(srv.Close)
+
+	pad := func(n int) string {
+		head := "package main\n\nfunc main() {}\n"
+		return head + strings.Repeat("// набивка\n", (n-len(head))/len("// набивка\n"))
+	}
+	// у потолка (много \n → тело JSON заметно больше 1024) — принят
+	body, _ := json.Marshal(map[string]string{"code": pad(1000)})
+	resp, _ := post(t, srv.URL+"/api/check", string(body))
+	if resp.StatusCode == http.StatusRequestEntityTooLarge {
+		t.Fatal("снипетт у потолка отвергнут 413 из-за JSON-обёртки")
+	}
+	// сверх потолка — честный 413
+	body, _ = json.Marshal(map[string]string{"code": pad(4000)})
+	resp, _ = post(t, srv.URL+"/api/check", string(body))
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("великан прошёл: статус %d", resp.StatusCode)
+	}
+}
+
 func TestExamplesEndpoint(t *testing.T) {
 	srv := testServer(t)
 	resp, err := http.Get(srv.URL + "/api/examples")
