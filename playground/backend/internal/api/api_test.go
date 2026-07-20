@@ -128,6 +128,38 @@ func TestCodeLimitOnDecodedCode(t *testing.T) {
 	}
 }
 
+// quit через /api/explore/cmd отвергается: иначе клиент завершал бы процесс,
+// оставляя мёртвый сеанс занимать слот SessionMax до жнеца.
+func TestExploreCmdRejectsQuit(t *testing.T) {
+	srv := testServer(t)
+	code := "package main\n\nimport eye \"github.com/vitikevich-landau/go_magic_eye\"\n\nfunc main() {\n\tx := 42\n\teye.Explore(&x, \"ответ\")\n}\n"
+	body, _ := json.Marshal(map[string]string{"code": code})
+	resp, m := post(t, srv.URL+"/api/explore", string(body))
+	if resp.StatusCode != http.StatusOK || m["ok"] != true {
+		t.Fatalf("сеанс не начался: %d %v", resp.StatusCode, m)
+	}
+	session := m["session"].(string)
+	rootID := int(m["roots"].([]any)[0].(map[string]any)["id"].(float64))
+	t.Cleanup(func() {
+		b, _ := json.Marshal(map[string]string{"session": session})
+		post(t, srv.URL+"/api/explore/close", string(b))
+	})
+
+	quit, _ := json.Marshal(map[string]any{"session": session, "cmd": "quit"})
+	resp, _ = post(t, srv.URL+"/api/explore/cmd", string(quit))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("quit прошёл сквозь API: статус %d", resp.StatusCode)
+	}
+
+	// сеанс жив: detail по корню отвечает (корень — лист, kids бы честно
+	// отказал, а detail работает всегда)
+	detail, _ := json.Marshal(map[string]any{"session": session, "cmd": "detail", "node": rootID})
+	resp, m = post(t, srv.URL+"/api/explore/cmd", string(detail))
+	if resp.StatusCode != http.StatusOK || m["ok"] != true {
+		t.Fatalf("сеанс не пережил отвергнутый quit: %d %v", resp.StatusCode, m)
+	}
+}
+
 func TestExamplesEndpoint(t *testing.T) {
 	srv := testServer(t)
 	resp, err := http.Get(srv.URL + "/api/examples")

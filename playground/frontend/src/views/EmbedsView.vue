@@ -17,7 +17,7 @@ const emit = defineEmits<{ lit: [range: { offset: number; size: number } | null]
         v-for="(e, i) in embeds"
         :key="i"
         class="cursor-pointer rounded border border-grimoire-purple/40 bg-grimoire-panel2 px-3 py-1.5 text-sm transition hover:border-grimoire-gold"
-        :style="{ marginLeft: (e.depth - 1) * 1.5 + 'rem' }"
+        :style="{ marginLeft: e.depth * 1.5 + 'rem' }"
         @mouseenter="emit('lit', { offset: e.offset, size: e.size })"
         @mouseleave="emit('lit', null)"
       >

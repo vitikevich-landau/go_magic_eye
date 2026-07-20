@@ -146,6 +146,13 @@ func (s *Server) handleExploreCmd(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "ожидался JSON {session, cmd, node}")
 		return
 	}
+	// наружу торчат только команды чтения: quit, пущенный сюда, завершил бы
+	// процесс, оставив мёртвый сеанс занимать слот SessionMax до жнеца —
+	// закрытие идёт своей ручкой (/api/explore/close), она и вычёркивает
+	if req.Cmd != "kids" && req.Cmd != "detail" {
+		writeError(w, http.StatusBadRequest, "команда не из странствия: только kids и detail (закрытие — /api/explore/close)")
+		return
+	}
 	live := s.runner.Session(req.Session)
 	if live == nil {
 		writeError(w, http.StatusNotFound, "сеанса нет: истёк или не существовал")
