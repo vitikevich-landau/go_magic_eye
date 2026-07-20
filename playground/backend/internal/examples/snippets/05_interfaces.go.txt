@@ -1,0 +1,39 @@
+//eye:title Интерфейсы: itab — «vtable» Go
+//eye:topic iface/eface, слоты itab, ловушка typed nil
+// Урок 5: значение интерфейса — два слова: itab (кто ты и что умеешь)
+// и data (где лежишь). Диаграмма покажет путь «слово → itab → слот → код».
+//
+// В конце — знаменитая ловушка: интерфейс с nil-указателем внутри
+// сам НЕ равен nil. Око пометит её тревожным цветом.
+package main
+
+import (
+	"fmt"
+
+	eye "github.com/vitikevich-landau/go_magic_eye"
+)
+
+type Greeter interface {
+	Hail() string
+	Rank() int
+}
+
+type Knight struct {
+	Name string
+	Deed int
+}
+
+func (k *Knight) Hail() string { return "За короля, " + k.Name + "!" }
+func (k *Knight) Rank() int    { return k.Deed }
+
+func main() {
+	k := &Knight{Name: "Ланселот", Deed: 42}
+	var g Greeter = k
+	eye.Inspect(&g, "живой интерфейс")
+
+	// ловушка typed nil: указатель nil, но интерфейс — НЕ nil
+	var dead *Knight
+	var trap Greeter = dead
+	fmt.Println("trap == nil?", trap == nil) // false!
+	eye.Inspect(&trap, "ловушка typed nil")
+}

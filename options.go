@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/vitikevich-landau/go_magic_eye/internal/render"
 	"github.com/vitikevich-landau/go_magic_eye/internal/term"
@@ -28,6 +29,11 @@ import (
 //	EYE_HEIGHT=N       высота кадра в EYE_SCRIPT-режиме (по умолчанию 40)
 //	EYE_ASCII=1        рамки и стрелки — чистый ASCII
 //	EYE_SNAP_DIR=…     каталог для снимков экрана клавишей s
+//	EYE_FORMAT=json    вместо рамок печатать JSON-модель (машинный вид)
+//	EYE_JSON_FD=N      конверты JSON — в файловый дескриптор N (открывает
+//	                   родитель), stdout остаётся человеку
+//	EYE_SESSION=1      Explore/галерея: сеансовый JSON-протокол по
+//	                   stdin/stdout вместо TUI (см. internal/proto)
 //
 // Кроме своих переменных Око уважает общепринятые сигналы: NO_COLOR
 // (непустое значение — цвет выкл) и TERM=dumb; явный EYE_COLOR их
@@ -41,7 +47,25 @@ type config struct {
 	full   bool
 	color  *bool // nil — автоматика: «писатель — терминал с ANSI?»
 	ascii  bool
+	format Format
 }
+
+// Format — вид, в котором Око отдаёт увиденное.
+type Format int
+
+const (
+	// Text — рамки-картуши для человека (по умолчанию).
+	Text Format = iota
+	// JSON — конверт с моделями для машин: playground, снапшоты, диффы,
+	// сторонние визуализации. Контракт — playground/SPEC.md §2.1. Цвет,
+	// ширина и центрирование в этом виде не участвуют.
+	JSON
+)
+
+// WithFormat — вид вывода: Text (рамки) или JSON (как EYE_FORMAT=json).
+// В JSON-режиме Inspect/Finspect печатают конверт с одной моделью, галерея —
+// конверт со всеми корнями; TUI-странствие не запускается.
+func WithFormat(f Format) Option { return func(c *config) { c.format = f } }
 
 // Option — программная настройка одного вызова (Finspect, FinspectType,
 // NewGallery). Опция сильнее одноимённой переменной окружения.
@@ -102,6 +126,16 @@ func envBool(name string, def bool) bool {
 	return def
 }
 
+// envFormat — EYE_FORMAT: «json» — машинный вид, всё прочее (включая
+// пустоту и «text») — рамки. Незнакомое значение не ошибка: человек получит
+// привычный текст, а не молчание.
+func envFormat(name string) Format {
+	if strings.EqualFold(os.Getenv(name), "json") {
+		return JSON
+	}
+	return Text
+}
+
 func envInt(name string, def int) int {
 	if n, err := strconv.Atoi(os.Getenv(name)); err == nil && n > 0 {
 		return n
@@ -120,6 +154,7 @@ func loadConfig(opts ...Option) config {
 		center: envBool("EYE_CENTER", true),
 		full:   envBool("EYE_FULL", false),
 		ascii:  envBool("EYE_ASCII", false),
+		format: envFormat("EYE_FORMAT"),
 	}
 	if v, ok := envLookupBool("EYE_COLOR"); ok {
 		cfg.color = &v
@@ -154,8 +189,8 @@ func loadConfig(opts ...Option) config {
 	case onTTY:
 		color = term.EnableColor(fd)
 	}
-	text.Color = color
-	text.ASCII = cfg.ascii
+	text.SetColor(color)
+	text.SetASCII(cfg.ascii)
 
 	// ширина — у того терминала, куда пойдёт вывод (не обязательно stdout)
 	if cfg.width == 0 {

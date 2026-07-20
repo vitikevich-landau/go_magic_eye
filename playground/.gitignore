@@ -1,0 +1,4 @@
+# артефакты фронтенда: собранное кладётся в backend/web/dist и вшивается
+# go:embed при сборке образа — в репозитории живут только исходники
+frontend/node_modules/
+backend/web/dist/

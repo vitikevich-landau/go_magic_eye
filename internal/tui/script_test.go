@@ -317,9 +317,10 @@ func TestFrameLinesNeverOverflowWidth(t *testing.T) {
 // EYE_ASCII: в кадрах не должно остаться ни одного «богатого» глифа —
 // псевдографики, стрелок, эмодзи (регресс подтверждённой находки ревью).
 func TestASCIIModeHasNoFancyGlyphs(t *testing.T) {
-	oldA, oldC := text.ASCII, text.Color
-	text.ASCII, text.Color = true, false
-	defer func() { text.ASCII, text.Color = oldA, oldC }()
+	oldA, oldC := text.ASCIIOn(), text.ColorOn()
+	text.SetASCII(true)
+	text.SetColor(false)
+	defer func() { text.SetASCII(oldA); text.SetColor(oldC) }()
 
 	app := NewApp(session(t), t.TempDir())
 	app.W, app.H = 100, 24

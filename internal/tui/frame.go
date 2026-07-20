@@ -284,7 +284,7 @@ func (a *App) treeLine(n *nav.Node, cursor bool, w int) string {
 		if a.focus != 0 {
 			marker = text.CDim + text.CSel
 		}
-		if text.Color {
+		if text.ColorOn() {
 			return marker + stripANSI(s) + strings.Repeat(" ", pad) + text.CReset
 		}
 		return text.Rune("▶", ">") + s[minI(len(s), 1):]

@@ -24,8 +24,10 @@ package eye
 import (
 	"fmt"
 	"io"
+	"os"
 	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/vitikevich-landau/go_magic_eye/internal/model"
 	"github.com/vitikevich-landau/go_magic_eye/internal/render"
@@ -41,14 +43,13 @@ import (
 // Настройки — переменными окружения EYE_*; программный вывод — Finspect.
 func Inspect(obj any, label ...string) {
 	cfg := loadConfig(WithLabel(first(label)))
-	printLines(render.Render(model.Of(obj, cfg.label), cfg.renderOptions()), cfg)
+	emit(model.Of(obj, cfg.label), cfg)
 }
 
 // InspectType — только статика типа: объект не нужен.
 func InspectType[T any](label ...string) {
 	cfg := loadConfig(WithLabel(first(label)))
-	m := model.OfType(reflect.TypeOf((*T)(nil)).Elem(), cfg.label)
-	printLines(render.Render(m, cfg.renderOptions()), cfg)
+	emit(model.OfType(reflect.TypeOf((*T)(nil)).Elem(), cfg.label), cfg)
 }
 
 // Finspect — как Inspect, но печатает в w: буфер теста, файл отчёта, пайп.
@@ -57,14 +58,13 @@ func InspectType[T any](label ...string) {
 // выключен — в буфер идёт чистый текст.
 func Finspect(w io.Writer, obj any, opts ...Option) {
 	cfg := loadConfig(append([]Option{WithWriter(w)}, opts...)...)
-	printLines(render.Render(model.Of(obj, cfg.label), cfg.renderOptions()), cfg)
+	emit(model.Of(obj, cfg.label), cfg)
 }
 
 // FinspectType — как InspectType, но печатает в w. Настройки — опциями.
 func FinspectType[T any](w io.Writer, opts ...Option) {
 	cfg := loadConfig(append([]Option{WithWriter(w)}, opts...)...)
-	m := model.OfType(reflect.TypeOf((*T)(nil)).Elem(), cfg.label)
-	printLines(render.Render(m, cfg.renderOptions()), cfg)
+	emit(model.OfType(reflect.TypeOf((*T)(nil)).Elem(), cfg.label), cfg)
 }
 
 // TypeOf — маркер «типа без объекта» для галереи: g.Add(eye.TypeOf[Config]()).
@@ -82,6 +82,65 @@ func first(label []string) string {
 		return label[0]
 	}
 	return ""
+}
+
+// emit — единая точка вывода одной модели: развилка «человеку или машине».
+func emit(m *model.Model, cfg config) {
+	if cfg.format == JSON {
+		printJSON([]*model.Model{m}, cfg)
+		return
+	}
+	printLines(render.Render(m, cfg.renderOptions()), cfg)
+}
+
+// printJSON — конверт с моделями в писатель. Цвет, ширина и центрирование
+// машинного вида не касаются. Ошибка маршалинга здесь невозможна по
+// построению (в DTO только строки и числа), но глотать её молча нельзя —
+// уйдёт валидным JSON-объектом с полем error.
+//
+// EYE_JSON_FD=N — отдельный канал для конвертов: машинный вывод уходит в
+// готовый файловый дескриптор N (его открывает родитель — playground даёт
+// pipe через ExtraFiles), а stdout остаётся целиком человеку. Так конверт
+// не смешивается с печатью программы и не гибнет под её потолками. Канал
+// не дался (fd закрыт) — конверт не теряется: падаем в обычный писатель.
+func printJSON(models []*model.Model, cfg config) {
+	b, err := model.ToJSON(models)
+	if err != nil {
+		b = []byte(fmt.Sprintf("{\"eye_json_version\":%d,\"error\":%q}", model.JSONVersion, err.Error()))
+	}
+	// конверт начинается с чистой строки: перед Inspect могла быть печать
+	// без завершающего \n (fmt.Print) — потребитель, режущий поток по
+	// строкам, не должен получить склейку «хвост{конверт}»
+	payload := append([]byte("\n"), b...)
+	payload = append(payload, '\n')
+	if fd := envInt("EYE_JSON_FD", 0); fd > 0 {
+		if _, werr := jsonFD(fd).Write(payload); werr == nil {
+			return
+		}
+	}
+	cfg.out.Write(payload)
+}
+
+// jsonFDs — обёртки унаследованных дескрипторов, по одной на fd и НАВСЕГДА:
+// os.NewFile вешает финализатор, и одноразовая обёртка после GC закрыла бы
+// чужой дескриптор — второй Inspect молча падал бы в фолбэк. Мьютекс, а не
+// sync.Map: LoadOrStore при гонке породил бы ДВЕ обёртки, и финализатор
+// проигравшей закрыл бы общий fd — NewFile обязан звучать ровно один раз
+// на дескриптор.
+var (
+	jsonFDMu sync.Mutex
+	jsonFDs  = map[int]*os.File{}
+)
+
+func jsonFD(fd int) *os.File {
+	jsonFDMu.Lock()
+	defer jsonFDMu.Unlock()
+	f, ok := jsonFDs[fd]
+	if !ok {
+		f = os.NewFile(uintptr(fd), "eye-json")
+		jsonFDs[fd] = f
+	}
+	return f
 }
 
 // printLines — вывод с центрированием (EYE_CENTER) по ширине экрана.

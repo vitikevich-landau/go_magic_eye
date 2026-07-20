@@ -1,0 +1,166 @@
+package sandbox
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+const envA = "{\n  \"eye_json_version\": 1,\n  \"models\": [{\"label\": \"а\"}]\n}\n"
+const envB = "{\n  \"eye_json_version\": 1,\n  \"models\": [{\"label\": \"б\"}, {\"label\": \"в\"}]\n}\n"
+
+func modelCount(t *testing.T, envelope []byte) int {
+	t.Helper()
+	var e struct {
+		Version int               `json:"eye_json_version"`
+		Models  []json.RawMessage `json:"models"`
+	}
+	if err := json.Unmarshal(envelope, &e); err != nil {
+		t.Fatalf("слитый конверт не парсится: %v\n%s", err, envelope)
+	}
+	if e.Version != 1 {
+		t.Fatalf("версия слитого конверта = %d", e.Version)
+	}
+	return len(e.Models)
+}
+
+func TestExtractSingleEnvelope(t *testing.T) {
+	env, rest := ExtractEnvelopes([]byte(envA))
+	if env == nil {
+		t.Fatal("конверт не найден")
+	}
+	if n := modelCount(t, env); n != 1 {
+		t.Errorf("моделей %d, ожидалась 1", n)
+	}
+	if strings.TrimSpace(rest) != "" {
+		t.Errorf("остаток не пуст: %q", rest)
+	}
+}
+
+// Разделительный \n, которым библиотека отделяет конверт от возможного
+// незавершённого хвоста, — не печать пользователя: снипетт из одного
+// Inspect обязан вернуть stdout СТРОГО пустым (фронт прячет пустую панель),
+// а свои переводы строк пользователь не теряет.
+func TestExtractSeparatorNotUserOutput(t *testing.T) {
+	if _, rest := ExtractEnvelopes([]byte("\n" + envA)); rest != "" {
+		t.Errorf("разделитель утёк в stdout: %q", rest)
+	}
+	// два осмотра подряд, как их печатает библиотека: …\n + env + \n + env
+	if _, rest := ExtractEnvelopes([]byte("\n" + envA + "\n" + envB)); rest != "" {
+		t.Errorf("разделитель между конвертами утёк: %q", rest)
+	}
+	// перевод строки самого пользователя цел
+	_, rest := ExtractEnvelopes([]byte("привет\n" + "\n" + envA))
+	if rest != "привет\n" {
+		t.Errorf("пользовательский \\n пострадал: %q", rest)
+	}
+}
+
+// Два Inspect'а + пользовательские fmt.Println между ними: конверты сливаются,
+// печать пользователя остаётся в остатке в исходном порядке.
+func TestExtractMixedOutput(t *testing.T) {
+	mixed := "привет от пользователя\n" + envA + "между осмотрами\n" + envB + "и в конце\n"
+	env, rest := ExtractEnvelopes([]byte(mixed))
+	if n := modelCount(t, env); n != 3 {
+		t.Errorf("моделей %d, ожидалось 3 (слияние двух конвертов)", n)
+	}
+	for _, want := range []string{"привет от пользователя", "между осмотрами", "и в конце"} {
+		if !strings.Contains(rest, want) {
+			t.Errorf("в остатке нет %q: %q", want, rest)
+		}
+	}
+	if strings.Contains(rest, "eye_json_version") {
+		t.Errorf("конверт просочился в остаток: %q", rest)
+	}
+}
+
+// Пользовательский JSON без eye_json_version — не конверт: остаётся в stdout.
+func TestExtractUserJSONNotStolen(t *testing.T) {
+	user := "{\"my\": \"json\"}\n"
+	env, rest := ExtractEnvelopes([]byte(user))
+	if env != nil {
+		t.Errorf("чужой JSON принят за конверт: %s", env)
+	}
+	if !strings.Contains(rest, "\"my\": \"json\"") {
+		t.Errorf("пользовательский JSON пропал: %q", rest)
+	}
+}
+
+// Лог-самозванец с версией, но БЕЗ массива models — тоже не конверт:
+// раньше он молча съедался (позиция сдвигалась, моделей ноль), и строка
+// пользователя исчезала из stdout.
+func TestExtractImpostorWithoutModelsNotStolen(t *testing.T) {
+	for _, impostor := range []string{
+		"{\"eye_json_version\":1}\n",
+		"{\"eye_json_version\":1,\"message\":\"лог\"}\n",
+	} {
+		env, rest := ExtractEnvelopes([]byte(impostor))
+		if env != nil {
+			t.Errorf("самозванец %q принят за конверт: %s", impostor, env)
+		}
+		if !strings.Contains(rest, "eye_json_version") {
+			t.Errorf("самозванец %q пропал из stdout: %q", impostor, rest)
+		}
+	}
+	// …а рядом с настоящим конвертом самозванец уходит в остаток,
+	// настоящий — в модели
+	env, rest := ExtractEnvelopes([]byte("{\"eye_json_version\":1,\"message\":\"лог\"}\n" + envA))
+	if n := modelCount(t, env); n != 1 {
+		t.Errorf("настоящий конверт рядом с самозванцем: моделей %d", n)
+	}
+	if !strings.Contains(rest, "\"message\"") {
+		t.Errorf("самозванец пропал: %q", rest)
+	}
+}
+
+// Два Inspect'а подряд без печати между ними — конверты стоят встык
+// (именно так выглядит вывод обычного примера с двумя осмотрами).
+func TestExtractConsecutiveEnvelopes(t *testing.T) {
+	env, rest := ExtractEnvelopes([]byte(envA + envB))
+	if n := modelCount(t, env); n != 3 {
+		t.Errorf("моделей %d, ожидалось 3", n)
+	}
+	if strings.Contains(rest, "eye_json_version") {
+		t.Errorf("конверт утёк в остаток: %q", rest)
+	}
+}
+
+// Конверт, приклеенный к печати без \n (fmt.Print перед Inspect), находится
+// по сигнатуре MarshalIndent; печать уцелевает в остатке.
+func TestExtractGluedToUnterminatedPrint(t *testing.T) {
+	env, rest := ExtractEnvelopes([]byte("progress: " + envA))
+	if env == nil {
+		t.Fatal("приклеенный конверт не найден")
+	}
+	if n := modelCount(t, env); n != 1 {
+		t.Errorf("моделей %d, ожидалась 1", n)
+	}
+	if !strings.Contains(rest, "progress:") {
+		t.Errorf("незавершённая печать пропала: %q", rest)
+	}
+	if strings.Contains(rest, "eye_json_version") {
+		t.Errorf("конверт остался в stdout: %q", rest)
+	}
+}
+
+// Валидный ПУСТОЙ конверт (models: []) — находка, а не null: пустая галерея
+// в JSON-режиме законна, eye не должен превращаться в null.
+func TestExtractEmptyEnvelopeKept(t *testing.T) {
+	env, rest := ExtractEnvelopes([]byte(`{"eye_json_version":1,"models":[]}` + "\n"))
+	if env == nil {
+		t.Fatal("пустой конверт выброшен")
+	}
+	if n := modelCount(t, env); n != 0 {
+		t.Errorf("моделей %d, ожидался пустой конверт", n)
+	}
+	if strings.TrimSpace(rest) != "" {
+		t.Errorf("остаток не пуст: %q", rest)
+	}
+}
+
+func TestExtractNoEnvelope(t *testing.T) {
+	env, rest := ExtractEnvelopes([]byte("просто текст\n"))
+	if env != nil || rest != "просто текст\n" {
+		t.Errorf("env=%s rest=%q", env, rest)
+	}
+}

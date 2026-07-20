@@ -1,8 +1,15 @@
 package eye_test
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	eye "github.com/vitikevich-landau/go_magic_eye"
@@ -113,6 +120,221 @@ func TestGalleryStaticRun(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("в статической печати галереи нет %q", want)
 		}
+	}
+}
+
+// jsonEnvelope — распарсенный конверт машинного вида (для тестов ниже).
+func jsonEnvelope(t *testing.T, out string) map[string]any {
+	t.Helper()
+	var env map[string]any
+	if err := json.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("вывод не парсится как JSON: %v\n%.300s", err, out)
+	}
+	if v, ok := env["eye_json_version"].(float64); !ok || v != 1 {
+		t.Fatalf("eye_json_version = %v, ожидалась 1", env["eye_json_version"])
+	}
+	return env
+}
+
+func TestFinspectJSONFormat(t *testing.T) {
+	var b strings.Builder
+	l := loot{Gold: 1200, Gems: []string{"рубин"}}
+	eye.Finspect(&b, &l, eye.WithLabel("казна"), eye.WithFormat(eye.JSON))
+	env := jsonEnvelope(t, b.String())
+	m := env["models"].([]any)[0].(map[string]any)
+	if m["label"] != "казна" {
+		t.Errorf("label = %v", m["label"])
+	}
+	if strings.Contains(b.String(), "\x1b[") {
+		t.Error("в JSON-виде оказались ANSI-коды")
+	}
+}
+
+func TestEnvFormatJSON(t *testing.T) {
+	t.Setenv("EYE_FORMAT", "json")
+	var b strings.Builder
+	eye.Finspect(&b, 42)
+	jsonEnvelope(t, b.String())
+}
+
+// EYE_JSON_FD уводит конверт в отдельный дескриптор: писателю (stdout
+// программы) не достаётся ничего — машинный канал отделён от человеческого.
+func TestEnvJSONFDRedirect(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	t.Setenv("EYE_FORMAT", "json")
+	t.Setenv("EYE_JSON_FD", fmt.Sprint(w.Fd()))
+
+	var b strings.Builder
+	eye.Finspect(&b, 42, eye.WithLabel("ответ"))
+
+	if b.String() != "" {
+		t.Errorf("конверт просочился в писатель: %.120q", b.String())
+	}
+	buf := make([]byte, 64*1024)
+	n, err := r.Read(buf)
+	if err != nil || n == 0 {
+		t.Fatalf("в канале конвертов пусто: %v", err)
+	}
+	jsonEnvelope(t, strings.TrimSpace(string(buf[:n])))
+}
+
+// readEnvelopes — фоновый читатель пайпа: копит, пока не увидит want
+// конвертов, и отдаёт накопленное. Читать нужно ПАРАЛЛЕЛЬНО писателям:
+// пайпы Windows синхронные и с крошечным буфером — читатель «после»
+// заблокировал бы писателей насмерть (CI это честно показал).
+func readEnvelopes(r *os.File, want int) <-chan string {
+	out := make(chan string, 1)
+	go func() {
+		got := ""
+		buf := make([]byte, 64*1024)
+		for strings.Count(got, "eye_json_version") < want {
+			n, err := r.Read(buf)
+			got += string(buf[:n])
+			if err != nil {
+				break
+			}
+		}
+		out <- got
+	}()
+	return out
+}
+
+func awaitEnvelopes(t *testing.T, ch <-chan string, want int) {
+	t.Helper()
+	select {
+	case got := <-ch:
+		if n := strings.Count(got, "eye_json_version"); n != want {
+			t.Fatalf("конвертов %d, ожидалось %d:\n%.300q", n, want, got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("конверты так и не дошли по каналу fd")
+	}
+}
+
+// Дескриптор конвертов переживает GC: одноразовая обёртка os.NewFile
+// после сборки мусора закрыла бы fd финализатором, и второй Inspect молча
+// падал бы в фолбэк — кэш jsonFDs держит обёртку живой.
+func TestEnvJSONFDSurvivesGC(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	t.Setenv("EYE_FORMAT", "json")
+	t.Setenv("EYE_JSON_FD", fmt.Sprint(w.Fd()))
+	ch := readEnvelopes(r, 2)
+
+	var b strings.Builder
+	eye.Finspect(&b, 1, eye.WithLabel("первый"))
+	runtime.GC()
+	runtime.GC() // финализаторы отрабатывают со второго круга
+	eye.Finspect(&b, 2, eye.WithLabel("второй"))
+
+	if b.String() != "" {
+		t.Fatalf("после GC конверт упал в фолбэк: %.120q", b.String())
+	}
+	awaitEnvelopes(t, ch, 2)
+}
+
+// Конкурентные Inspect'ы не плодят обёрток одного fd: гонка LoadOrStore
+// дала бы вторую обёртку, чей финализатор закрыл бы общий дескриптор.
+// Под go test -race тест ловит и гонки данных на кэше.
+func TestEnvJSONFDConcurrentInspects(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	t.Setenv("EYE_FORMAT", "json")
+	t.Setenv("EYE_JSON_FD", fmt.Sprint(w.Fd()))
+
+	const n = 8
+	ch := readEnvelopes(r, n) // читатель ДО писателей: пайп не резиновый
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var b strings.Builder
+			eye.Finspect(&b, i)
+			if b.String() != "" {
+				t.Errorf("конверт упал в фолбэк: %.80q", b.String())
+			}
+		}()
+	}
+	wg.Wait()
+	runtime.GC()
+	runtime.GC()
+	awaitEnvelopes(t, ch, n)
+}
+
+func TestWithFormatBeatsEnv(t *testing.T) {
+	t.Setenv("EYE_FORMAT", "json")
+	var b strings.Builder
+	eye.Finspect(&b, 42, eye.WithFormat(eye.Text), eye.WithColor(false))
+	if strings.HasPrefix(strings.TrimSpace(b.String()), "{") {
+		t.Error("WithFormat(Text) не перекрыл EYE_FORMAT=json")
+	}
+}
+
+// Сеансовый протокол живёт на stdout ПАРЫ ПРОЦЕССОВ, а не на писателе
+// WithWriter: родитель (playground) слушает stdout, и рукопожатие, ушедшее
+// в буфер, означало бы ложный «сеанс не начался».
+func TestSessionModeIgnoresWithWriter(t *testing.T) {
+	t.Setenv("EYE_SESSION", "1")
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	oldStdout := os.Stdout
+	os.Stdout = w
+	var buf strings.Builder
+	runErr := eye.NewGallery(eye.WithWriter(&buf)).Add(42, "ответ").Run()
+	os.Stdout = oldStdout
+	w.Close()
+
+	if runErr != nil {
+		t.Fatalf("Run: %v", runErr)
+	}
+	out, _ := io.ReadAll(r)
+	if !strings.Contains(string(out), "eye_session_version") {
+		t.Errorf("рукопожатие не дошло до stdout: %.200q", out)
+	}
+	if strings.Contains(buf.String(), "eye_session_version") {
+		t.Errorf("рукопожатие увели в WithWriter: %.200q", buf.String())
+	}
+}
+
+// Галерея в JSON-режиме отдаёт ОДИН конверт со всеми корнями — даже при
+// завалявшемся EYE_SCRIPT (машинный вид сильнее скрипта).
+func TestGalleryJSONRun(t *testing.T) {
+	t.Setenv("EYE_SCRIPT", "down q")
+	var b strings.Builder
+	l := loot{Gold: 7}
+	g := eye.NewGallery(eye.WithWriter(&b), eye.WithFormat(eye.JSON))
+	g.Add(&l, "сокровищница").Add(eye.TypeOf[Hero]())
+	if err := g.Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	env := jsonEnvelope(t, b.String())
+	ms := env["models"].([]any)
+	if len(ms) != 2 {
+		t.Fatalf("моделей %d, ожидалось 2", len(ms))
+	}
+	if ms[0].(map[string]any)["label"] != "сокровищница" {
+		t.Errorf("label первого корня = %v", ms[0].(map[string]any)["label"])
+	}
+	if ms[1].(map[string]any)["has_value"] != false {
+		t.Error("корень-тип (TypeOf) обязан прийти с has_value=false")
 	}
 }
 

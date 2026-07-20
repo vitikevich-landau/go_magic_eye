@@ -1,0 +1,28 @@
+//eye:title string, срез, map — заголовки и спутники
+//eye:topic заголовок строки, len/cap среза, хребет, map
+// Урок 3: string и slice — это маленькие заголовки, а данные живут отдельно.
+//
+// Смотри на панели-спутники: от слов заголовка (data) стрелки ведут к
+// внешней памяти — буферу строки и хребту среза с cap-хвостом.
+package main
+
+import (
+	eye "github.com/vitikevich-landau/go_magic_eye"
+)
+
+type Chest struct {
+	Motto string         // заголовок: data + len (данные — в .rodata)
+	Loot  []int16        // заголовок: data + len + cap
+	Fame  map[string]int // одно слово: указатель на hmap
+}
+
+func main() {
+	c := Chest{
+		Motto: "Semper Fidelis",
+		Loot:  make([]int16, 3, 8), // len 3, cap 8: хвост виден у спутника
+		Fame:  map[string]int{"дракон": 9000, "гоблин": 3},
+	}
+	c.Loot[0], c.Loot[1], c.Loot[2] = 10, 20, 30
+
+	eye.Inspect(&c, "сундук")
+}

@@ -64,9 +64,9 @@ func TestClipVisMid(t *testing.T) {
 }
 
 func TestLineBuilder(t *testing.T) {
-	old := Color
-	Color = true
-	defer func() { Color = old }()
+	old := ColorOn()
+	SetColor(true)
+	defer SetColor(old)
 	l := &Line{}
 	l.Add(CName, "поле").Sp(2).Add(CVal, "42")
 	if l.W() != 4+2+2 {
@@ -82,13 +82,13 @@ func TestLineBuilder(t *testing.T) {
 }
 
 func TestPaintRespectsToggle(t *testing.T) {
-	old := Color
-	defer func() { Color = old }()
-	Color = false
+	old := ColorOn()
+	defer SetColor(old)
+	SetColor(false)
 	if Paint(CWarn, "x") != "x" {
 		t.Fatal("без цвета строка должна быть голой")
 	}
-	Color = true
+	SetColor(true)
 	if !strings.Contains(Paint(CWarn, "x"), "\x1b[") {
 		t.Fatal("с цветом должен быть ANSI")
 	}

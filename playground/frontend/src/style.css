@@ -1,0 +1,95 @@
+@import 'tailwindcss';
+
+/* Тема «гримуар» — палитра родом из docs/interactive и TUI Ока:
+   тёмный пергамент, золото заголовков, лиловые руны. */
+@theme {
+  --color-grimoire-bg: #14101e;
+  --color-grimoire-panel: #1d1730;
+  --color-grimoire-panel2: #241c3a;
+  --color-grimoire-border: #3a2f57;
+  --color-grimoire-ink: #cbc3e3;
+  --color-grimoire-dim: #7d6fa0;
+  --color-grimoire-gold: #e6b450;
+  --color-grimoire-purple: #9d7cd8;
+  --color-grimoire-danger: #e26a6a;
+  --color-grimoire-ok: #7dc383;
+
+  /* сорта регионов карты памяти — согласованы с легендой */
+  --color-tone-fieldA: #2b4a6f;
+  --color-tone-fieldB: #35597f;
+  --color-tone-padding: #4a3a2a;
+  --color-tone-word: #4a3560;
+
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', Menlo, monospace;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  background: var(--color-grimoire-bg);
+  color: var(--color-grimoire-ink);
+}
+
+/* ── ячейки карты памяти ─────────────────────────────────────────── */
+.byte-cell {
+  transition:
+    filter 0.12s ease,
+    outline-color 0.12s ease,
+    transform 0.12s ease;
+  outline: 1px solid transparent;
+  cursor: default;
+}
+.byte-cell.tone-fieldA { background: var(--color-tone-fieldA); }
+.byte-cell.tone-fieldB { background: var(--color-tone-fieldB); }
+.byte-cell.tone-padding {
+  background: var(--color-tone-padding);
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent 0 4px,
+    rgba(0, 0, 0, 0.25) 4px 8px
+  );
+}
+.byte-cell.tone-word { background: var(--color-tone-word); }
+.byte-cell.tone-none { background: transparent; }
+.byte-cell.lit {
+  filter: brightness(1.45);
+  outline-color: var(--color-grimoire-gold);
+  z-index: 1;
+}
+
+/* ── анимация little-endian: байты перелетают в число ────────────── */
+@keyframes le-fly {
+  0% {
+    transform: translateY(-14px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.le-byte {
+  animation: le-fly 0.45s ease both;
+}
+
+/* ── стрелки-связи (SVG) ─────────────────────────────────────────── */
+@keyframes dash-draw {
+  from {
+    stroke-dashoffset: 240;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.arrow-draw {
+  stroke-dasharray: 240;
+  animation: dash-draw 0.8s ease-out both;
+}
+
+/* ── прокрутка в духе темы ───────────────────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-grimoire-border) transparent;
+}
