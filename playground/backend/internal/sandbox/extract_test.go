@@ -37,6 +37,25 @@ func TestExtractSingleEnvelope(t *testing.T) {
 	}
 }
 
+// Разделительный \n, которым библиотека отделяет конверт от возможного
+// незавершённого хвоста, — не печать пользователя: снипетт из одного
+// Inspect обязан вернуть stdout СТРОГО пустым (фронт прячет пустую панель),
+// а свои переводы строк пользователь не теряет.
+func TestExtractSeparatorNotUserOutput(t *testing.T) {
+	if _, rest := ExtractEnvelopes([]byte("\n" + envA)); rest != "" {
+		t.Errorf("разделитель утёк в stdout: %q", rest)
+	}
+	// два осмотра подряд, как их печатает библиотека: …\n + env + \n + env
+	if _, rest := ExtractEnvelopes([]byte("\n" + envA + "\n" + envB)); rest != "" {
+		t.Errorf("разделитель между конвертами утёк: %q", rest)
+	}
+	// перевод строки самого пользователя цел
+	_, rest := ExtractEnvelopes([]byte("привет\n" + "\n" + envA))
+	if rest != "привет\n" {
+		t.Errorf("пользовательский \\n пострадал: %q", rest)
+	}
+}
+
 // Два Inspect'а + пользовательские fmt.Println между ними: конверты сливаются,
 // печать пользователя остаётся в остатке в исходном порядке.
 func TestExtractMixedOutput(t *testing.T) {

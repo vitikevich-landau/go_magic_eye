@@ -33,7 +33,7 @@ const (
 	defaultSessionMax  = 8
 	defaultSessionIdle = 3 * time.Minute
 	defaultSessionLife = 30 * time.Minute
-	sessionHelloWait   = 10 * time.Second
+	defaultHelloWait   = 10 * time.Second
 	sessionCmdWait     = 10 * time.Second
 	reapTick           = 30 * time.Second
 )
@@ -232,8 +232,12 @@ func isProtocolLine(line []byte) bool {
 }
 
 // awaitHello — дождаться рукопожатия или честно объяснить, почему его нет.
+// Оба исхода — «программа вышла без Explore» и «не поздоровалась за
+// HelloWait» — вина снипетта, не песочницы: оба приходят классом
+// ErrNoSession, чтобы API отвечал пользовательской ошибкой, а не 500.
 func (s *Live) awaitHello() error {
-	deadline := time.After(sessionHelloWait)
+	wait := s.runner.opts.HelloWait
+	deadline := time.After(wait)
 	for {
 		select {
 		case line, open := <-s.lines:
@@ -252,7 +256,8 @@ func (s *Live) awaitHello() error {
 		case <-s.dead:
 			return ErrNoSession
 		case <-deadline:
-			return fmt.Errorf("странствие не началось за %s", sessionHelloWait)
+			return fmt.Errorf("%w (рукопожатие не пришло за %s: долгая подготовка перед Explore?)",
+				ErrNoSession, wait)
 		}
 	}
 }

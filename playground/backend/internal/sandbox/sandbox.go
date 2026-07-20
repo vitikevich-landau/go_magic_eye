@@ -37,6 +37,7 @@ type Options struct {
 	SessionMax  int           // одновременных сеансов (8)
 	SessionIdle time.Duration // смерть по простою (3 мин)
 	SessionLife time.Duration // потолок возраста (30 мин)
+	HelloWait   time.Duration // ожидание рукопожатия после старта (10 с)
 	ReapTick    time.Duration // шаг жнеца (30 с; тестам нужен мельче)
 }
 
@@ -85,6 +86,9 @@ func New(opts Options) *Runner {
 	}
 	if opts.SessionLife == 0 {
 		opts.SessionLife = defaultSessionLife
+	}
+	if opts.HelloWait == 0 {
+		opts.HelloWait = defaultHelloWait
 	}
 	return &Runner{opts: opts, sem: make(chan struct{}, opts.Concurrency)}
 }

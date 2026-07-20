@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -122,8 +123,37 @@ func TestSessionNoExplore(t *testing.T) {
 		live.Close()
 		t.Fatal("сеанс без Explore внезапно начался")
 	}
-	if !strings.Contains(err.Error(), "Explore") {
-		t.Errorf("причина отказа не про Explore: %v", err)
+	if !errors.Is(err, ErrNoSession) {
+		t.Errorf("отказ не класса ErrNoSession: %v", err)
+	}
+}
+
+// Программа копается дольше HelloWait перед Explore — это вина снипетта,
+// не песочницы: отказ обязан быть класса ErrNoSession (API ответит
+// пользовательской ошибкой, а не 500).
+func TestSessionHelloTimeoutIsUserError(t *testing.T) {
+	r := New(Options{LibDir: libDir(t), HelloWait: 300 * time.Millisecond})
+	code := `package main
+
+import (
+	"time"
+
+	eye "github.com/vitikevich-landau/go_magic_eye"
+)
+
+func main() {
+	time.Sleep(5 * time.Second) // «долгая подготовка»
+	x := 1
+	eye.Explore(&x)
+}
+`
+	live, _, err := r.StartSession(context.Background(), code)
+	if err == nil {
+		live.Close()
+		t.Fatal("сеанс начался вопреки HelloWait")
+	}
+	if !errors.Is(err, ErrNoSession) {
+		t.Errorf("таймаут рукопожатия не класса ErrNoSession: %v", err)
 	}
 }
 

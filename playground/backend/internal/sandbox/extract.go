@@ -47,7 +47,12 @@ func ExtractEnvelopes(out []byte) (envelope []byte, rest string) {
 		dec := json.NewDecoder(bytes.NewReader(out[cand:]))
 		var e env
 		if err := dec.Decode(&e); err == nil && e.Version == 1 {
-			restBuf.Write(out[pos:cand])
+			// один \n перед конвертом — разделитель самой библиотеки
+			// (конверт начинается с чистой строки), не печать пользователя:
+			// глотаем ровно его, пользовательские переводы строк целы
+			prefix := out[pos:cand]
+			prefix = bytes.TrimSuffix(prefix, []byte("\n"))
+			restBuf.Write(prefix)
 			models = append(models, e.Models...)
 			pos = cand + int(dec.InputOffset())
 			// съесть перевод строки, оставшийся от печати конверта
