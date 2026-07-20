@@ -274,24 +274,31 @@ func splitProtocol(line []byte) (noise, protocol []byte) {
 	return line, nil
 }
 
-// isProtocolLine — строка сеансового протокола: hello (eye_session_version)
-// или ответ ФОРМЫ ответа — id вместе с ok. Одного id мало: пользовательский
-// структурный лог вида {"id":1} протоколом не является и обязан дойти до
-// stdout, а не украсть место ответа в Do. (Лог, нарочно совпавший с полной
-// формой {"id":N,"ok":…}, различить уже нечем — честная граница эвристики.)
+// isProtocolLine — строка сеансового протокола: hello ПОЛНОЙ формы
+// (eye_session_version + массив roots — ровно то, что примет awaitHello)
+// или ответ формы ответа — id вместе с ok. Половинных форм протокол не
+// знает: лог {"id":1} или {"eye_session_version":1} без корней — печать
+// пользователя, она обязана дойти до stdout, а не пропасть между двумя
+// решетами (насос увёл из noise, рукопожатие отвергло). Лог, нарочно
+// совпавший с полной формой, различить уже нечем — честная граница
+// эвристики.
 func isProtocolLine(line []byte) bool {
 	if len(line) == 0 || line[0] != '{' {
 		return false
 	}
 	var probe struct {
-		ID      *int  `json:"id"`
-		OK      *bool `json:"ok"`
-		Version *int  `json:"eye_session_version"`
+		ID      *int            `json:"id"`
+		OK      *bool           `json:"ok"`
+		Version *int            `json:"eye_session_version"`
+		Roots   json.RawMessage `json:"roots"`
 	}
 	if err := json.Unmarshal(line, &probe); err != nil {
 		return false
 	}
-	return probe.Version != nil || (probe.ID != nil && probe.OK != nil)
+	if probe.Version != nil {
+		return bytes.HasPrefix(bytes.TrimSpace(probe.Roots), []byte("["))
+	}
+	return probe.ID != nil && probe.OK != nil
 }
 
 // awaitHello — дождаться рукопожатия или честно объяснить, почему его нет.

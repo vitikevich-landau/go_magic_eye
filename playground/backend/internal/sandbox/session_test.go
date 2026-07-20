@@ -358,6 +358,11 @@ func main() {
 	if roots[0]["label"] != "настоящий" {
 		t.Errorf("корень не от настоящего hello: %v", roots[0])
 	}
+	// лог-самозванец — печать пользователя: он обязан дойти до stdout,
+	// а не пропасть между насосом и рукопожатием
+	if noise := live.Noise(); !strings.Contains(noise, "eye_session_version") {
+		t.Errorf("самозванец пропал из stdout: %q", noise)
+	}
 }
 
 // Паника до Explore приходит с отказом НЕ голой: stderr с причиной
@@ -468,6 +473,9 @@ func TestSplitProtocol(t *testing.T) {
 		// структурный лог с id, но без ok — НЕ протокол: не должен украсть
 		// место ответа в Do
 		"лог с id": {`{"id":1}`, `{"id":1}`, ""},
+		// самозванец без корней — печать пользователя, не hello: обязан
+		// дойти до stdout, а не пропасть между насосом и рукопожатием
+		"самозванец hello": {`{"eye_session_version":1}`, `{"eye_session_version":1}`, ""},
 	} {
 		noise, proto := splitProtocol([]byte(tc.in))
 		if string(noise) != tc.noise || string(proto) != tc.proto {
