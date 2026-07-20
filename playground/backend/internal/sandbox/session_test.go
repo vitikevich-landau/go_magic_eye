@@ -324,6 +324,24 @@ func TestCloseDuringInflightCommand(t *testing.T) {
 	}
 }
 
+// Паника до Explore приходит с отказом НЕ голой: stderr с причиной
+// сохраняется в RunResult — пользователь видит, почему сеанса нет.
+func TestSessionNoHelloCarriesStderr(t *testing.T) {
+	r := newRunner(t)
+	code := "package main\n\nfunc main() { panic(\"упал до странствия\") }\n"
+	live, res, err := r.StartSession(context.Background(), code)
+	if err == nil {
+		live.Close()
+		t.Fatal("сеанс с паникой до Explore внезапно начался")
+	}
+	if !errors.Is(err, ErrNoSession) {
+		t.Fatalf("отказ не класса ErrNoSession: %v", err)
+	}
+	if !strings.Contains(res.Stderr, "упал до странствия") {
+		t.Errorf("stderr с причиной паники потерян: %q", res.Stderr)
+	}
+}
+
 // Гигантская строка (длиннее MaxOutput) до странствия не убивает насос:
 // хвост обрезается как шум, hello доходит, сеанс живёт.
 func TestSessionSurvivesOversizedLine(t *testing.T) {

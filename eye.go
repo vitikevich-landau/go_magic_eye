@@ -27,6 +27,7 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/vitikevich-landau/go_magic_eye/internal/model"
 	"github.com/vitikevich-landau/go_magic_eye/internal/render"
@@ -113,11 +114,24 @@ func printJSON(models []*model.Model, cfg config) {
 	payload := append([]byte("\n"), b...)
 	payload = append(payload, '\n')
 	if fd := envInt("EYE_JSON_FD", 0); fd > 0 {
-		if _, werr := os.NewFile(uintptr(fd), "eye-json").Write(payload); werr == nil {
+		if _, werr := jsonFD(fd).Write(payload); werr == nil {
 			return
 		}
 	}
 	cfg.out.Write(payload)
+}
+
+// jsonFDs — обёртки унаследованных дескрипторов, по одной на fd и НАВСЕГДА:
+// os.NewFile вешает финализатор, и одноразовая обёртка после GC закрыла бы
+// чужой дескриптор — второй Inspect молча падал бы в фолбэк.
+var jsonFDs sync.Map // int → *os.File
+
+func jsonFD(fd int) *os.File {
+	if f, ok := jsonFDs.Load(fd); ok {
+		return f.(*os.File)
+	}
+	f, _ := jsonFDs.LoadOrStore(fd, os.NewFile(uintptr(fd), "eye-json"))
+	return f.(*os.File)
 }
 
 // printLines — вывод с центрированием (EYE_CENTER) по ширине экрана.

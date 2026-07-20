@@ -74,6 +74,9 @@ export const useExplore = defineStore('explore', {
         this.appendStdout(res.stdout)
         if (!res.ok || !res.session || !res.roots) {
           this.error = res.error || (res.diagnostics.length ? 'снипетт не собрался' : 'сеанс не начался')
+          // паника/OOM до Explore: первая строка stderr объясняет причину
+          const firstLine = res.stderr?.split('\n').find((l) => l.trim())
+          if (firstLine) this.error += ` — ${firstLine.trim()}`
           return
         }
         this.session = res.session

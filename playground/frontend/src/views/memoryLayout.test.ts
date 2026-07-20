@@ -4,6 +4,7 @@ import {
   hexToBytes,
   isLittleEndianCandidate,
   leSteps,
+  MAX_CELLS,
   regionAt,
   regionTone,
 } from './memoryLayout'
@@ -62,6 +63,19 @@ describe('buildCells', () => {
   it('младший байт HP=100 — первый (little-endian)', () => {
     expect(cells[0].hex).toBe('64')
     expect(cells[1].hex).toBe('00')
+  })
+})
+
+describe('великан-тип не вешает вкладку', () => {
+  it('ячейки ограничены MAX_CELLS даже при size в гигабайт', () => {
+    const giant: EyeModel = {
+      ...model,
+      has_value: false,
+      bytes: '',
+      passport: { ...model.passport, size: 1 << 30 },
+    }
+    const cells = buildCells(giant)
+    expect(cells).toHaveLength(MAX_CELLS)
   })
 })
 

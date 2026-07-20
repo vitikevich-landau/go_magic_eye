@@ -9,6 +9,7 @@ import {
   buildCells,
   isLittleEndianCandidate,
   leSteps,
+  MAX_CELLS,
   regionTone,
 } from './memoryLayout'
 
@@ -136,6 +137,10 @@ const fields = computed(() =>
         </li>
       </ul>
     </div>
+
+    <p v-if="model.passport.size > MAX_CELLS" class="mt-2 text-xs text-grimoire-dim">
+      ⋯ показаны первые {{ MAX_CELLS }} Б из {{ model.passport.size }} — дальше карта была бы обоями ⋯
+    </p>
 
     <!-- выноска: урок выбранного региона -->
     <div

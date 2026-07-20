@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	eye "github.com/vitikevich-landau/go_magic_eye"
@@ -177,6 +179,41 @@ func TestEnvJSONFDRedirect(t *testing.T) {
 		t.Fatalf("в канале конвертов пусто: %v", err)
 	}
 	jsonEnvelope(t, strings.TrimSpace(string(buf[:n])))
+}
+
+// Дескриптор конвертов переживает GC: одноразовая обёртка os.NewFile
+// после сборки мусора закрыла бы fd финализатором, и второй Inspect молча
+// падал бы в фолбэк — кэш jsonFDs держит обёртку живой.
+func TestEnvJSONFDSurvivesGC(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	t.Setenv("EYE_FORMAT", "json")
+	t.Setenv("EYE_JSON_FD", fmt.Sprint(w.Fd()))
+
+	var b strings.Builder
+	eye.Finspect(&b, 1, eye.WithLabel("первый"))
+	runtime.GC()
+	runtime.GC() // финализаторы отрабатывают со второго круга
+	eye.Finspect(&b, 2, eye.WithLabel("второй"))
+
+	if b.String() != "" {
+		t.Fatalf("после GC конверт упал в фолбэк: %.120q", b.String())
+	}
+	got := ""
+	buf := make([]byte, 64*1024)
+	deadline := time.Now().Add(3 * time.Second)
+	for strings.Count(got, "eye_json_version") < 2 {
+		r.SetReadDeadline(deadline)
+		n, rerr := r.Read(buf)
+		got += string(buf[:n])
+		if rerr != nil {
+			t.Fatalf("дочитать оба конверта не вышло: %v\nполучено: %.200q", rerr, got)
+		}
+	}
 }
 
 func TestWithFormatBeatsEnv(t *testing.T) {

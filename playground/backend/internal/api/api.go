@@ -113,9 +113,10 @@ func (s *Server) handleExplore(w http.ResponseWriter, r *http.Request) {
 	live, res, err := s.runner.StartSession(r.Context(), code)
 	switch {
 	case errors.Is(err, sandbox.ErrNoSession):
+		// паника/OOM до Explore — в stderr: причина отказа важнее самого отказа
 		writeJSON(w, http.StatusOK, exploreResponse{
 			OK: false, Diagnostics: []diag.Diag{},
-			Error: err.Error(),
+			Error: err.Error(), Stderr: res.Stderr, CompileMS: res.CompileMS,
 		})
 		return
 	case err != nil:

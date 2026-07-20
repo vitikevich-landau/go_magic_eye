@@ -37,13 +37,18 @@ export function regionAt(regions: Region[], offset: number): number {
   return -1
 }
 
+// MAX_CELLS — потолок ячеек карты: InspectType[[1<<30]byte] честно вернёт
+// size в гигабайт, и без потолка вкладка легла бы, материализуя миллиард
+// ячеек. 4 КиБ хватает любому учебному типу; хвост помечается в MemoryMap.
+export const MAX_CELLS = 4096
+
 // buildCells — все байты объекта как ячейки сетки 8 колонок.
 // Тип без объекта (InspectType/AddType): байтов нет, но раскладка полей и
 // дыр есть — ячейки строятся по размеру из паспорта с заглушкой «··»
 // вместо значений.
 export function buildCells(model: EyeModel): ByteCell[] {
   const bytes = hexToBytes(model.bytes)
-  const n = bytes.length || model.passport.size
+  const n = Math.min(bytes.length || model.passport.size, MAX_CELLS)
   return Array.from({ length: n }, (_, offset) => {
     const b = bytes[offset]
     return {
