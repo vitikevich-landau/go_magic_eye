@@ -97,6 +97,12 @@ func Run(sess *nav.Session, in io.Reader, out io.Writer) {
 	for _, r := range sess.Roots {
 		roots = append(roots, s.dto(r))
 	}
+	// hello обязан начаться с чистой строки: программа могла напечатать
+	// что-то без завершающего \n (fmt.Print) прямо перед странствием, и
+	// без этого разрыва рукопожатие приклеилось бы к чужому хвосту
+	if _, err := s.out.Write([]byte("\n")); err != nil {
+		return
+	}
 	if !s.write(hello{Version: Version, Roots: roots}) {
 		return
 	}

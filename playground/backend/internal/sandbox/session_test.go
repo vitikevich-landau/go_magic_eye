@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -152,5 +153,86 @@ func TestSessionMax(t *testing.T) {
 	if live2, _, err := r.StartSession(context.Background(), exploreSnippet); err == nil {
 		live2.Close()
 		t.Fatal("второй сеанс прошёл сквозь SessionMax=1")
+	}
+}
+
+// …и держится под одновременным штурмом: бронь слота атомарна, пачка
+// параллельных explore не пробивает SessionMax (TOCTOU-гонка из ревью).
+func TestSessionMaxConcurrent(t *testing.T) {
+	r := New(Options{LibDir: libDir(t), SessionMax: 1})
+	const n = 4
+	results := make(chan *Live, n)
+	var wg sync.WaitGroup
+	for range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			live, _, err := r.StartSession(context.Background(), exploreSnippet)
+			if err == nil {
+				results <- live
+			}
+		}()
+	}
+	wg.Wait()
+	close(results)
+	var started []*Live
+	for live := range results {
+		started = append(started, live)
+	}
+	for _, live := range started {
+		defer live.Close()
+	}
+	if len(started) != 1 {
+		t.Fatalf("сквозь SessionMax=1 прошло %d сеансов", len(started))
+	}
+}
+
+// Печать БЕЗ завершающего \n прямо перед Explore не съедает рукопожатие:
+// hello начинается с чистой строки (библиотека), а склейки расклеивает
+// насос (splitProtocol).
+func TestSessionHelloAfterUnterminatedPrint(t *testing.T) {
+	code := `package main
+
+import (
+	"fmt"
+
+	eye "github.com/vitikevich-landau/go_magic_eye"
+)
+
+func main() {
+	x := 42
+	fmt.Print("прогресс: ") // нарочно без \n
+	eye.Explore(&x, "ответ")
+}
+`
+	r := newRunner(t)
+	live, res, err := r.StartSession(context.Background(), code)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	defer live.Close()
+	if !res.OK {
+		t.Fatalf("сеанс не начался: %+v", res)
+	}
+	if noise := live.Noise(); !strings.Contains(noise, "прогресс:") {
+		t.Errorf("незавершённая печать потерялась: %q", noise)
+	}
+}
+
+func TestSplitProtocol(t *testing.T) {
+	for name, tc := range map[string]struct {
+		in           string
+		noise, proto string
+	}{
+		"чистый протокол":   {`{"id":1,"ok":true}`, "", `{"id":1,"ok":true}`},
+		"чистый шум":        {"привет", "привет", ""},
+		"склейка":           {`тик{"id":2,"ok":true}`, "тик", `{"id":2,"ok":true}`},
+		"склейка hello":     {`x{"eye_session_version":1,"roots":[]}`, "x", `{"eye_session_version":1,"roots":[]}`},
+		"json пользователя": {`{"my":"json"}`, `{"my":"json"}`, ""},
+	} {
+		noise, proto := splitProtocol([]byte(tc.in))
+		if string(noise) != tc.noise || string(proto) != tc.proto {
+			t.Errorf("%s: noise=%q proto=%q, ожидалось %q/%q", name, noise, proto, tc.noise, tc.proto)
+		}
 	}
 }

@@ -45,9 +45,10 @@ type Runner struct {
 	opts Options
 	sem  chan struct{}
 
-	sessMu     sync.Mutex
-	sessions   map[string]*Live
-	reaperOnce sync.Once
+	sessMu      sync.Mutex
+	sessions    map[string]*Live
+	sessPending int // брони под стартующие сеансы (reserveSessionSlot)
+	reaperOnce  sync.Once
 }
 
 // New — песочница с заполненными умолчаниями.

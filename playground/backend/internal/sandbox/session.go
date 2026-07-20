@@ -12,6 +12,7 @@ package sandbox
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -80,9 +81,13 @@ func (r *Runner) StartSession(ctx context.Context, code string) (*Live, RunResul
 	}
 	defer release()
 
-	if n := r.sessionCount(); n >= r.opts.SessionMax {
-		return nil, RunResult{}, fmt.Errorf("%w: живых сеансов уже %d", ErrBusy, n)
+	// слот сеанса бронируется АТОМАРНО до дорогой компиляции: проверка
+	// счётчика и регистрация порознь дали бы пачке одновременных explore
+	// пробить SessionMax (TOCTOU)
+	if err := r.reserveSessionSlot(); err != nil {
+		return nil, RunResult{}, err
 	}
+	defer r.releaseSessionSlot()
 
 	dir, cleanup, err := r.workdir(code)
 	if err != nil {
@@ -160,28 +165,50 @@ func (r *Runner) launchSession(prog, dir string, compileMS int64) (*Live, error)
 
 // pump — разбор stdout процесса: протокольные строки (JSON-объект с id или
 // hello) уходят в канал, всё прочее — печать пользователя, копится в noise.
+// Склейки «префикс{протокол}» (горутина напечатала без \n ровно перед
+// ответом) расклеиваются: префикс — в noise, JSON — в канал.
 func (s *Live) pump(stdout interface{ Read([]byte) (int, error) }) {
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for sc.Scan() {
 		line := sc.Bytes()
-		if isProtocolLine(line) {
-			cp := make([]byte, len(line))
-			copy(cp, line)
+		noise, protocol := splitProtocol(line)
+		if len(noise) > 0 {
+			s.noiseMu.Lock()
+			if s.noise.Len() < int(s.runner.opts.MaxOutput) {
+				s.noise.Write(noise)
+				s.noise.WriteByte('\n')
+			}
+			s.noiseMu.Unlock()
+		}
+		if protocol != nil {
+			cp := make([]byte, len(protocol))
+			copy(cp, protocol)
 			select {
 			case s.lines <- cp:
 			default: // клиент не ждёт ответа — строку некому отдать
 			}
-			continue
 		}
-		s.noiseMu.Lock()
-		if s.noise.Len() < int(s.runner.opts.MaxOutput) {
-			s.noise.Write(line)
-			s.noise.WriteByte('\n')
-		}
-		s.noiseMu.Unlock()
 	}
 	close(s.lines)
+}
+
+// splitProtocol — делит строку stdout на печать пользователя и протокольное
+// сообщение. Чистая протокольная строка → (nil, line); чистый шум →
+// (line, nil); склейка «префикс{json}» → (префикс, json).
+func splitProtocol(line []byte) (noise, protocol []byte) {
+	if len(line) == 0 {
+		return nil, nil // пустые строки — артефакты разрывов протокола
+	}
+	if isProtocolLine(line) {
+		return nil, line
+	}
+	for _, marker := range [][]byte{[]byte(`{"eye_session_version"`), []byte(`{"id"`)} {
+		if i := bytes.Index(line, marker); i > 0 && isProtocolLine(line[i:]) {
+			return line[:i], line[i:]
+		}
+	}
+	return line, nil
 }
 
 // isProtocolLine — строка сеансового протокола: JSON-объект с полем id
@@ -296,6 +323,26 @@ func (s *Live) Close() {
 
 // ── реестр сеансов на Runner ─────────────────────────────────────────
 
+// reserveSessionSlot — бронь под будущий сеанс: живые + брони < SessionMax.
+// Пока бронь держится (до releaseSessionSlot в конце StartSession), только
+// что зарегистрированный сеанс считается дважды — это безопасная сторона
+// ошибки: перебор отвергнет лишнего, но никогда не пропустит.
+func (r *Runner) reserveSessionSlot() error {
+	r.sessMu.Lock()
+	defer r.sessMu.Unlock()
+	if len(r.sessions)+r.sessPending >= r.opts.SessionMax {
+		return fmt.Errorf("%w: живых сеансов уже %d", ErrBusy, len(r.sessions)+r.sessPending)
+	}
+	r.sessPending++
+	return nil
+}
+
+func (r *Runner) releaseSessionSlot() {
+	r.sessMu.Lock()
+	r.sessPending--
+	r.sessMu.Unlock()
+}
+
 func (r *Runner) registerSession(s *Live) {
 	r.sessMu.Lock()
 	if r.sessions == nil {
@@ -317,12 +364,6 @@ func (r *Runner) Session(id string) *Live {
 	r.sessMu.Lock()
 	defer r.sessMu.Unlock()
 	return r.sessions[id]
-}
-
-func (r *Runner) sessionCount() int {
-	r.sessMu.Lock()
-	defer r.sessMu.Unlock()
-	return len(r.sessions)
 }
 
 // reapLoop — жнец: закрывает простаивающие и зажившиеся сеансы.
