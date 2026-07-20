@@ -123,15 +123,24 @@ func printJSON(models []*model.Model, cfg config) {
 
 // jsonFDs — обёртки унаследованных дескрипторов, по одной на fd и НАВСЕГДА:
 // os.NewFile вешает финализатор, и одноразовая обёртка после GC закрыла бы
-// чужой дескриптор — второй Inspect молча падал бы в фолбэк.
-var jsonFDs sync.Map // int → *os.File
+// чужой дескриптор — второй Inspect молча падал бы в фолбэк. Мьютекс, а не
+// sync.Map: LoadOrStore при гонке породил бы ДВЕ обёртки, и финализатор
+// проигравшей закрыл бы общий fd — NewFile обязан звучать ровно один раз
+// на дескриптор.
+var (
+	jsonFDMu sync.Mutex
+	jsonFDs  = map[int]*os.File{}
+)
 
 func jsonFD(fd int) *os.File {
-	if f, ok := jsonFDs.Load(fd); ok {
-		return f.(*os.File)
+	jsonFDMu.Lock()
+	defer jsonFDMu.Unlock()
+	f, ok := jsonFDs[fd]
+	if !ok {
+		f = os.NewFile(uintptr(fd), "eye-json")
+		jsonFDs[fd] = f
 	}
-	f, _ := jsonFDs.LoadOrStore(fd, os.NewFile(uintptr(fd), "eye-json"))
-	return f.(*os.File)
+	return f
 }
 
 // printLines — вывод с центрированием (EYE_CENTER) по ширине экрана.

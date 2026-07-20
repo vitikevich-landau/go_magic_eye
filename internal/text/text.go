@@ -180,7 +180,7 @@ func (l *Line) String() string { return l.sb.String() }
 
 // Rune — символ по роли с ASCII-запасным вариантом (EYE_ASCII=1).
 func Rune(unicode, ascii string) string {
-	if ASCII {
+	if ASCIIOn() {
 		return ascii
 	}
 	return unicode

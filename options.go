@@ -189,8 +189,8 @@ func loadConfig(opts ...Option) config {
 	case onTTY:
 		color = term.EnableColor(fd)
 	}
-	text.Color = color
-	text.ASCII = cfg.ascii
+	text.SetColor(color)
+	text.SetASCII(cfg.ascii)
 
 	// ширина — у того терминала, куда пойдёт вывод (не обязательно stdout)
 	if cfg.width == 0 {

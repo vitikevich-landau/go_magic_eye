@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -212,6 +213,49 @@ func TestEnvJSONFDSurvivesGC(t *testing.T) {
 		got += string(buf[:n])
 		if rerr != nil {
 			t.Fatalf("дочитать оба конверта не вышло: %v\nполучено: %.200q", rerr, got)
+		}
+	}
+}
+
+// Конкурентные Inspect'ы не плодят обёрток одного fd: гонка LoadOrStore
+// дала бы вторую обёртку, чей финализатор закрыл бы общий дескриптор.
+// Под go test -race тест ловит и гонки данных на кэше.
+func TestEnvJSONFDConcurrentInspects(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	t.Setenv("EYE_FORMAT", "json")
+	t.Setenv("EYE_JSON_FD", fmt.Sprint(w.Fd()))
+
+	const n = 8
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var b strings.Builder
+			eye.Finspect(&b, i)
+			if b.String() != "" {
+				t.Errorf("конверт упал в фолбэк: %.80q", b.String())
+			}
+		}()
+	}
+	wg.Wait()
+	runtime.GC()
+	runtime.GC()
+
+	got := ""
+	buf := make([]byte, 256*1024)
+	deadline := time.Now().Add(3 * time.Second)
+	for strings.Count(got, "eye_json_version") < n {
+		r.SetReadDeadline(deadline)
+		nn, rerr := r.Read(buf)
+		got += string(buf[:nn])
+		if rerr != nil {
+			t.Fatalf("дошло %d конвертов из %d: %v", strings.Count(got, "eye_json_version"), n, rerr)
 		}
 	}
 }

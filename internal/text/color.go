@@ -4,13 +4,29 @@
 // Пакет ничего не знает ни о рефлексии, ни о терминале — только буквы.
 package text
 
-// Color — глобальный выключатель цвета. Выставляется пакетом eye при старте
-// (EYE_COLOR=1/0 или автоопределение терминала). Когда false, Paint отдаёт
-// строку как есть — вывод в файл остаётся чистым текстом.
-var Color = false
+import "sync/atomic"
 
-// ASCII — рисовать рамки и стрелки чистым ASCII (EYE_ASCII=1, бедные шрифты).
-var ASCII = false
+// Глобальные выключатели цвета и ASCII-рамок. Атомики, а не голые bool:
+// loadConfig выставляет их на КАЖДЫЙ вызов Inspect/Finspect, и конкурентные
+// осмотры из разных горутин (законный сценарий, особенно в JSON-режиме на
+// сервере) иначе гонялись бы на записи.
+var (
+	colorOn atomic.Bool
+	asciiOn atomic.Bool
+)
+
+// SetColor — глобальный выключатель цвета (EYE_COLOR=1/0 или автоопределение
+// терминала). Когда выключен, Paint отдаёт строку как есть.
+func SetColor(on bool) { colorOn.Store(on) }
+
+// ColorOn — включён ли цвет.
+func ColorOn() bool { return colorOn.Load() }
+
+// SetASCII — рисовать рамки и стрелки чистым ASCII (EYE_ASCII=1).
+func SetASCII(on bool) { asciiOn.Store(on) }
+
+// ASCIIOn — включён ли режим чистого ASCII.
+func ASCIIOn() bool { return asciiOn.Load() }
 
 // Стили палитры «Гримуар» (256-цветный ANSI). Имена — по роли, не по цвету.
 //
@@ -42,7 +58,7 @@ const (
 
 // Paint красит строку стилем, если цвет включён.
 func Paint(style, s string) string {
-	if !Color || style == "" || s == "" {
+	if !ColorOn() || style == "" || s == "" {
 		return s
 	}
 	return style + s + CReset
