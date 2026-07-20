@@ -102,7 +102,7 @@ func (r *Runner) StartSession(ctx context.Context, code string) (*Live, RunResul
 	compileMS := time.Since(t0).Milliseconds()
 	if err != nil {
 		cleanup()
-		return nil, RunResult{OK: false, Diags: diag.Parse(stderr), Stderr: stderr, CompileMS: compileMS}, nil
+		return nil, RunResult{OK: false, Diags: diagsOrFallback(stderr), Stderr: stderr, CompileMS: compileMS}, nil
 	}
 
 	s, err := r.launchSession(prog, dir, compileMS)
@@ -181,30 +181,77 @@ func (r *Runner) launchSession(prog, dir string, compileMS int64) (*Live, error)
 // hello) уходят в канал, всё прочее — печать пользователя, копится в noise.
 // Склейки «префикс{протокол}» (горутина напечатала без \n ровно перед
 // ответом) расклеиваются: префикс — в noise, JSON — в канал.
+//
+// Строка ЛЮБОЙ длины не убивает насос: bufio.Scanner на гигантской строке
+// вернул бы ErrTooLong и сеанс выглядел бы мёртвым — вместо этого хвост
+// сверх MaxOutput молча отбрасывается (это заведомо печать пользователя:
+// протокольные кадры такими не бывают), и разбор продолжается.
 func (s *Live) pump(stdout interface{ Read([]byte) (int, error) }) {
-	sc := bufio.NewScanner(stdout)
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for sc.Scan() {
-		line := sc.Bytes()
-		noise, protocol := splitProtocol(line)
-		if len(noise) > 0 {
-			s.noiseMu.Lock()
-			if s.noise.Len() < int(s.runner.opts.MaxOutput) {
-				s.noise.Write(noise)
-				s.noise.WriteByte('\n')
+	maxLine := int(s.runner.opts.MaxOutput)
+	br := bufio.NewReaderSize(stdout, 64*1024)
+	line := make([]byte, 0, 4096)
+	clipped := false
+
+	flush := func() {
+		if clipped {
+			// протокольным кадр такого размера быть не может — только шум
+			s.addNoise(append(line, []byte(" ⋯ строка обрезана песочницей ⋯")...))
+		} else {
+			noise, protocol := splitProtocol(line)
+			if len(noise) > 0 {
+				s.addNoise(noise)
 			}
-			s.noiseMu.Unlock()
+			if protocol != nil {
+				cp := make([]byte, len(protocol))
+				copy(cp, protocol)
+				select {
+				case s.lines <- cp:
+				default: // клиент не ждёт ответа — строку некому отдать
+				}
+			}
 		}
-		if protocol != nil {
-			cp := make([]byte, len(protocol))
-			copy(cp, protocol)
-			select {
-			case s.lines <- cp:
-			default: // клиент не ждёт ответа — строку некому отдать
+		line = line[:0]
+		clipped = false
+	}
+
+	for {
+		chunk, err := br.ReadSlice('\n')
+		if n := len(chunk); n > 0 {
+			c := chunk
+			gotNL := c[n-1] == '\n'
+			if gotNL {
+				c = c[:n-1]
 			}
+			if room := maxLine - len(line); len(c) > room {
+				c = c[:max(room, 0)]
+				clipped = true
+			}
+			line = append(line, c...)
+			if gotNL {
+				flush()
+			}
+		}
+		if err == bufio.ErrBufferFull {
+			continue // строка длиннее буфера — дочитываем её кусками
+		}
+		if err != nil {
+			if len(line) > 0 {
+				flush() // хвост без \n перед закрытием пайпа
+			}
+			break
 		}
 	}
 	close(s.lines)
+}
+
+// addNoise — печать пользователя в буфер (с потолком MaxOutput).
+func (s *Live) addNoise(b []byte) {
+	s.noiseMu.Lock()
+	if s.noise.Len() < int(s.runner.opts.MaxOutput) {
+		s.noise.Write(b)
+		s.noise.WriteByte('\n')
+	}
+	s.noiseMu.Unlock()
 }
 
 // splitProtocol — делит строку stdout на печать пользователя и протокольное

@@ -123,6 +123,28 @@ func TestRunKillsInfiniteLoop(t *testing.T) {
 	}
 }
 
+// Таймаут компиляции — не пустой отказ: причина видна и в stderr, и
+// диагностикой 1:1 (маркером в редакторе).
+func TestCompileTimeoutIsVisible(t *testing.T) {
+	r := New(Options{LibDir: libDir(t), CompileTimeout: time.Millisecond})
+	res, err := r.Run(context.Background(), okSnippet)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.OK {
+		t.Fatal("компиляция уложилась в 1 мс?")
+	}
+	if res.Stderr == "" {
+		t.Error("stderr пуст — причина таймаута потеряна")
+	}
+	if len(res.Diags) == 0 || !strings.Contains(res.Diags[0].Message, "не уложилась") {
+		t.Errorf("нет запасной диагностики о таймауте: %+v", res.Diags)
+	}
+	if res.Diags[0].Line != 1 {
+		t.Errorf("запасная диагностика не на 1:1: %+v", res.Diags[0])
+	}
+}
+
 // «package foo» — частая опечатка: go build успешно пишет АРХИВ, не бинарь,
 // и раньше запуск падал сбоем песочницы (500). Теперь — диагностика с
 // позицией, единая для check/run/explore.

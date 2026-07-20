@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -181,7 +182,7 @@ func (r *Runner) Check(ctx context.Context, code string) (CheckResult, error) {
 
 	_, stderr, err := r.compile(ctx, dir)
 	if err != nil {
-		return CheckResult{OK: false, Diags: diag.Parse(stderr)}, nil
+		return CheckResult{OK: false, Diags: diagsOrFallback(stderr)}, nil
 	}
 	return CheckResult{OK: true, Diags: []diag.Diag{}}, nil
 }
@@ -209,7 +210,7 @@ func (r *Runner) Run(ctx context.Context, code string) (RunResult, error) {
 	compileMS := time.Since(t0).Milliseconds()
 	if err != nil {
 		return RunResult{
-			OK: false, Diags: diag.Parse(stderr),
+			OK: false, Diags: diagsOrFallback(stderr),
 			Stderr: stderr, CompileMS: compileMS,
 		}, nil
 	}
@@ -270,11 +271,30 @@ func (r *Runner) compile(ctx context.Context, dir string) (prog, stderr string, 
 	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
 		if cctx.Err() != nil {
-			return "", "", fmt.Errorf("компиляция не уложилась в %s", r.opts.CompileTimeout)
+			// причина уходит и в stderr: у таймаута нет вывода компилятора,
+			// а пустой отказ (ok:false без единого слова) хуже честного
+			msg := fmt.Sprintf("компиляция не уложилась в %s", r.opts.CompileTimeout)
+			return "", msg, fmt.Errorf("%s", msg)
 		}
 		return "", errBuf.String(), err
 	}
 	return prog, "", nil
+}
+
+// diagsOrFallback — позиционные диагностики из stderr компилятора; если
+// парсер не выудил ни одной (таймаут, «go:»-ошибки модуля), беда приходит
+// одной диагностикой 1:1 с сырым текстом — маркер в редакторе будет всегда.
+func diagsOrFallback(stderr string) []diag.Diag {
+	ds := diag.Parse(stderr)
+	if len(ds) == 0 {
+		if msg := strings.TrimSpace(stderr); msg != "" {
+			if len(msg) > 500 {
+				msg = msg[:500] + "…"
+			}
+			ds = append(ds, diag.Diag{Line: 1, Col: 1, Severity: "error", Message: msg})
+		}
+	}
+	return ds
 }
 
 // execute — запуск собранной программы с минимальным окружением, лимитами

@@ -324,6 +324,47 @@ func TestCloseDuringInflightCommand(t *testing.T) {
 	}
 }
 
+// Гигантская строка (длиннее MaxOutput) до странствия не убивает насос:
+// хвост обрезается как шум, hello доходит, сеанс живёт.
+func TestSessionSurvivesOversizedLine(t *testing.T) {
+	r := New(Options{LibDir: libDir(t), MaxOutput: 64 * 1024}) // потолок поменьше — тест быстрый
+	code := `package main
+
+import (
+	"fmt"
+	"strings"
+
+	eye "github.com/vitikevich-landau/go_magic_eye"
+)
+
+func main() {
+	fmt.Println("до:" + strings.Repeat("x", 1<<20)) // строка на мегабайт
+	x := 42
+	eye.Explore(&x, "ответ")
+}
+`
+	live, res, err := r.StartSession(context.Background(), code)
+	if err != nil {
+		t.Fatalf("StartSession: %v (гигантская строка убила насос?)", err)
+	}
+	defer live.Close()
+	if !res.OK {
+		t.Fatalf("сеанс не начался: %+v", res)
+	}
+	noise := live.Noise()
+	if !strings.Contains(noise, "обрезана") {
+		t.Errorf("обрезание гигантской строки не помечено: %.120q", noise)
+	}
+	// и протокол после неё жив
+	var roots []map[string]any
+	if err := json.Unmarshal(live.Roots, &roots); err != nil || len(roots) != 1 {
+		t.Fatalf("roots после гигантской строки: %v / %s", err, live.Roots)
+	}
+	if _, err := live.Do("detail", int(roots[0]["id"].(float64))); err != nil {
+		t.Errorf("detail после гигантской строки: %v", err)
+	}
+}
+
 // Клиент отменил запрос (закрыл вкладку), пока снипетт готовился к
 // странствию: сеанс не регистрируется и не живёт сиротой до жнеца.
 func TestStartSessionClientCancelNotRegistered(t *testing.T) {
