@@ -22,6 +22,9 @@ export const useExplore = defineStore('explore', {
     diagnostics: [] as Diagnostic[],
     error: '' as string, // причина, почему сеанса нет (нет Explore, умер…)
     starting: false,
+    // поколение старта: stop()/новый start() его двигают, и ответ сервера,
+    // прилетевший из прошлого поколения, не воскрешает отменённый сеанс
+    startGen: 0,
   }),
   getters: {
     roots(state): TreeNode[] {
@@ -55,11 +58,18 @@ export const useExplore = defineStore('explore', {
 
     async start(code: string) {
       this.stop() // старый сеанс — вежливо закрыть
+      const gen = ++this.startGen
       this.starting = true
       this.error = ''
       this.diagnostics = []
       try {
         const res = await startExplore(code)
+        if (gen !== this.startGen) {
+          // пока компилировались — передумали (stop или новый start):
+          // сеанс-сирота закрывается сразу, не дожидаясь жнеца
+          if (res.ok && res.session) closeExplore(res.session)
+          return
+        }
         this.diagnostics = res.diagnostics
         this.appendStdout(res.stdout)
         if (!res.ok || !res.session || !res.roots) {
@@ -71,13 +81,14 @@ export const useExplore = defineStore('explore', {
         this.rootIds = roots.map((n) => n.id)
         if (roots.length > 0) this.select(roots[0].id)
       } catch (e) {
-        this.error = (e as Error).message
+        if (gen === this.startGen) this.error = (e as Error).message
       } finally {
-        this.starting = false
+        if (gen === this.startGen) this.starting = false
       }
     },
 
     stop() {
+      this.startGen++ // поздний ответ start() из прошлого поколения — сирота
       if (this.session) closeExplore(this.session)
       this.session = ''
       this.nodes = new Map()
@@ -86,6 +97,7 @@ export const useExplore = defineStore('explore', {
       this.detail = null
       this.stdoutLog = ''
       this.error = ''
+      this.starting = false
     },
 
     dead(msg: string) {
@@ -125,15 +137,18 @@ export const useExplore = defineStore('explore', {
       if (!n || !this.session) return
       this.selectedId = id
       this.detailLoading = true
+      const session = this.session
       try {
-        const res = await exploreCmd(this.session, 'detail', id)
+        const res = await exploreCmd(session, 'detail', id)
+        if (this.session !== session) return // сеанс сменился — ответ из прошлого
         this.appendStdout(res.stdout)
+        if (this.selectedId !== id) return // быстрые клики: выбор уже уехал
         this.detail = res.ok && res.eye ? (res.eye.models[0] ?? null) : null
       } catch (e) {
         if (e instanceof SessionGoneError) this.dead(e.message)
-        else this.error = (e as Error).message
+        else if (this.session === session) this.error = (e as Error).message
       } finally {
-        this.detailLoading = false
+        if (this.session === session && this.selectedId === id) this.detailLoading = false
       }
     },
 
