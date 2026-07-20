@@ -315,7 +315,11 @@ func (s *Live) awaitHello(ctx context.Context) error {
 				Version int             `json:"eye_session_version"`
 				Roots   json.RawMessage `json:"roots"`
 			}
-			if json.Unmarshal(line, &hi) == nil && hi.Version >= 1 {
+			// hello обязан нести МАССИВ корней: пользовательский лог с
+			// одним лишь eye_session_version — не рукопожатие, и сеанс с
+			// Roots == nil (пустое дерево, некому закрыть) не начинается
+			if json.Unmarshal(line, &hi) == nil && hi.Version >= 1 &&
+				bytes.HasPrefix(bytes.TrimSpace(hi.Roots), []byte("[")) {
 				s.Roots = hi.Roots
 				return nil
 			}

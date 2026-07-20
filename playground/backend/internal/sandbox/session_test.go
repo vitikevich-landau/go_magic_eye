@@ -324,6 +324,42 @@ func TestCloseDuringInflightCommand(t *testing.T) {
 	}
 }
 
+// Поддельный hello (пользовательский лог с eye_session_version, но без
+// roots) не открывает сеанс: настоящее рукопожатие обязано нести массив
+// корней — сеанс стартует по нему, а не по логу.
+func TestSessionFakeHelloIgnored(t *testing.T) {
+	r := newRunner(t)
+	code := `package main
+
+import (
+	"fmt"
+
+	eye "github.com/vitikevich-landau/go_magic_eye"
+)
+
+func main() {
+	fmt.Println(` + "`{\"eye_session_version\":1}`" + `) // лог-самозванец
+	x := 42
+	eye.Explore(&x, "настоящий")
+}
+`
+	live, res, err := r.StartSession(context.Background(), code)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	defer live.Close()
+	if !res.OK {
+		t.Fatalf("сеанс не начался: %+v", res)
+	}
+	var roots []map[string]any
+	if err := json.Unmarshal(live.Roots, &roots); err != nil || len(roots) != 1 {
+		t.Fatalf("сеанс открыт не настоящим hello: %s (%v)", live.Roots, err)
+	}
+	if roots[0]["label"] != "настоящий" {
+		t.Errorf("корень не от настоящего hello: %v", roots[0])
+	}
+}
+
 // Паника до Explore приходит с отказом НЕ голой: stderr с причиной
 // сохраняется в RunResult — пользователь видит, почему сеанса нет.
 func TestSessionNoHelloCarriesStderr(t *testing.T) {
