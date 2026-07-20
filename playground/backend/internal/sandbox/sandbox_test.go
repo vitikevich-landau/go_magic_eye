@@ -159,6 +159,33 @@ func main() {
 	}
 }
 
+// Осмотр гигантского объекта не топит конверт: сериализация усекает дамп,
+// и модель доезжает целой (раньше 6-мегабайтный hex гиб под потолками).
+func TestRunGiantObjectEnvelopeSurvives(t *testing.T) {
+	code := `package main
+
+import (
+	eye "github.com/vitikevich-landau/go_magic_eye"
+)
+
+func main() {
+	var x [3 << 20]byte
+	x[0] = 1
+	eye.Inspect(&x, "гигант")
+}
+`
+	res, err := newRunner(t).Run(context.Background(), code)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !res.OK || res.Envelope == nil {
+		t.Fatalf("конверт гиганта не доехал: ok=%v, stderr=%.200q", res.OK, res.Stderr)
+	}
+	if !strings.Contains(string(res.Envelope), "гигант") {
+		t.Errorf("в конверте нет модели гиганта: %.200s", res.Envelope)
+	}
+}
+
 // Кросс-переменные окружения сервера не протекают в сборку: снипетт
 // собирается бежать ЗДЕСЬ, а не на GOOS из чужого экспорта.
 func TestRunPinsHostPlatform(t *testing.T) {

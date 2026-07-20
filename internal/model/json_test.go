@@ -130,6 +130,21 @@ func TestJSONEmptySlicesNotNull(t *testing.T) {
 	}
 }
 
+// Дамп гиганта усечён при сериализации: конверт обязан выживать под
+// потолками транспорта, неся первые jsonBytesCap байт, а не гибнуть целиком.
+func TestJSONBytesCapped(t *testing.T) {
+	giant := [64 << 10]byte{}
+	env := envelopeOf(t, []*Model{Of(&giant, "гигант")})
+	m := env["models"].([]any)[0].(map[string]any)
+	if hexLen := len(m["bytes"].(string)); hexLen != 2*jsonBytesCap {
+		t.Errorf("hex-дамп %d символов, ожидалось %d (потолок)", hexLen, 2*jsonBytesCap)
+	}
+	// усечение видно потребителю: байт меньше, чем size в паспорте
+	if size := m["passport"].(map[string]any)["size"].(float64); int(size) != 64<<10 {
+		t.Errorf("паспорт потерял настоящий размер: %v", size)
+	}
+}
+
 func TestJSONMultipleModels(t *testing.T) {
 	a, b := 1, "два"
 	env := envelopeOf(t, []*Model{Of(&a, "первый"), Of(&b, "второй")})

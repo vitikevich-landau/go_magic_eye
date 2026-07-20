@@ -39,6 +39,11 @@ function dump(hex: string): { hex: string; ascii: string }[] {
             :title="b.ascii"
             >{{ b.hex }}</span
           >
+          <!-- конверт несёт усечённый дамп: сериализация режет гигантов,
+               чтобы модель выживала под потолками транспорта -->
+          <span v-if="s.bytes.length / 2 < s.size" class="px-1 py-0.5 text-grimoire-dim">
+            ⋯ ещё {{ s.size - s.bytes.length / 2 }} Б ⋯
+          </span>
         </div>
 
         <ul v-if="s.elems.length" class="mt-1 space-y-0.5 text-xs text-grimoire-purple">

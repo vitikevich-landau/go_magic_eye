@@ -22,6 +22,22 @@ import (
 // JSONVersion — версия контракта конверта.
 const JSONVersion = 1
 
+// jsonBytesCap — потолок сырых байт в конверте (до hex-кодирования).
+// Гигантский объект ([3<<20]byte) иначе раздул бы конверт на мегабайты, и
+// тот погиб бы ЦЕЛИКОМ под потолками транспорта (пайпы, буферы, строки
+// протокола) — вместо модели с честно усечённым дампом. Потребителю дампа
+// нужно куда меньше (карта playground показывает первые 4 КиБ); усечение
+// видно по len(bytes)/2 < passport.size / < sat.size.
+const jsonBytesCap = 16 << 10
+
+// hexCapped — hex первых jsonBytesCap байт.
+func hexCapped(b []byte) string {
+	if len(b) > jsonBytesCap {
+		b = b[:jsonBytesCap]
+	}
+	return hex.EncodeToString(b)
+}
+
 type jsonEnvelope struct {
 	Version int         `json:"eye_json_version"`
 	Models  []jsonModel `json:"models"`
@@ -120,7 +136,7 @@ func toJSONModel(m *Model) jsonModel {
 		},
 		HasValue: m.HasValue,
 		Addr:     addr(m.Addr),
-		Bytes:    hex.EncodeToString(m.Bytes),
+		Bytes:    hexCapped(m.Bytes),
 		Regions:  make([]jsonRegion, 0, len(m.Regions)),
 		Embeds:   make([]jsonEmbed, 0, len(m.Embeds)),
 		Ifaces:   make([]jsonIface, 0, len(m.Ifaces)),
@@ -173,7 +189,7 @@ func toJSONModel(m *Model) jsonModel {
 			Title: s.Title,
 			Addr:  addr(s.Addr),
 			Size:  s.Size,
-			Bytes: hex.EncodeToString(s.Bytes),
+			Bytes: hexCapped(s.Bytes),
 			Elems: strs(s.Elems),
 			Note:  s.Note,
 		})
