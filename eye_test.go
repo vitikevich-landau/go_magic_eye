@@ -3,6 +3,7 @@ package eye_test
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"strings"
@@ -280,6 +281,36 @@ func TestWithFormatBeatsEnv(t *testing.T) {
 	eye.Finspect(&b, 42, eye.WithFormat(eye.Text), eye.WithColor(false))
 	if strings.HasPrefix(strings.TrimSpace(b.String()), "{") {
 		t.Error("WithFormat(Text) не перекрыл EYE_FORMAT=json")
+	}
+}
+
+// Сеансовый протокол живёт на stdout ПАРЫ ПРОЦЕССОВ, а не на писателе
+// WithWriter: родитель (playground) слушает stdout, и рукопожатие, ушедшее
+// в буфер, означало бы ложный «сеанс не начался».
+func TestSessionModeIgnoresWithWriter(t *testing.T) {
+	t.Setenv("EYE_SESSION", "1")
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	oldStdout := os.Stdout
+	os.Stdout = w
+	var buf strings.Builder
+	runErr := eye.NewGallery(eye.WithWriter(&buf)).Add(42, "ответ").Run()
+	os.Stdout = oldStdout
+	w.Close()
+
+	if runErr != nil {
+		t.Fatalf("Run: %v", runErr)
+	}
+	out, _ := io.ReadAll(r)
+	if !strings.Contains(string(out), "eye_session_version") {
+		t.Errorf("рукопожатие не дошло до stdout: %.200q", out)
+	}
+	if strings.Contains(buf.String(), "eye_session_version") {
+		t.Errorf("рукопожатие увели в WithWriter: %.200q", buf.String())
 	}
 }
 

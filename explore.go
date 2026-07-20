@@ -81,9 +81,12 @@ func (g *Gallery) AddType(m TypeMarker, label ...string) *Gallery {
 func (g *Gallery) Run() error {
 	cfg := loadConfig(g.opts...)
 	// сеансовый протокол — самый сильный режим: клиент (playground, плагин)
-	// явно попросил живой диалог по stdin/stdout (см. internal/proto)
+	// явно попросил живой диалог по stdin/stdout (см. internal/proto).
+	// Именно os.Stdout, а не cfg.out: протокол — канал к РОДИТЕЛЬСКОМУ
+	// процессу, который слушает stdout пары процесса; WithWriter управляет
+	// человеческим выводом и не должен уводить рукопожатие в буфер
 	if envBool("EYE_SESSION", false) {
-		proto.Run(g.session(), os.Stdin, cfg.out)
+		proto.Run(g.session(), os.Stdin, os.Stdout)
 		return nil
 	}
 	// машинный вид сильнее странствия и скрипта: программа, запущенная ради
