@@ -6,7 +6,12 @@ import type { Iface } from '../api/types'
 
 const props = defineProps<{ iface: Iface }>()
 
-const isNil = computed(() => props.iface.dyn_type.includes('nil') && !props.iface.typed_nil)
+// nil-интерфейс определяется по сырым словам (оба нулевые — рисовать
+// нечего), а не по имени динамического типа: пользовательский тип
+// `nilBox` не должен прикидываться nil'ом из-за подстроки
+const isNil = computed(
+  () => !props.iface.tab_addr && !props.iface.data_addr && !props.iface.typed_nil,
+)
 </script>
 
 <template>
