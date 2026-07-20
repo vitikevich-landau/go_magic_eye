@@ -123,6 +123,20 @@ func TestRunKillsInfiniteLoop(t *testing.T) {
 	}
 }
 
+// Кросс-переменные окружения сервера не протекают в сборку: снипетт
+// собирается бежать ЗДЕСЬ, а не на GOOS из чужого экспорта.
+func TestRunPinsHostPlatform(t *testing.T) {
+	t.Setenv("GOOS", "windows")
+	t.Setenv("GOARCH", "arm64")
+	res, err := newRunner(t).Run(context.Background(), okSnippet)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !res.OK || res.Envelope == nil {
+		t.Fatalf("кросс-GOOS просочился в сборку: %+v (stderr: %s)", res.Diags, res.Stderr)
+	}
+}
+
 // Таймаут компиляции — не пустой отказ: причина видна и в stderr, и
 // диагностикой 1:1 (маркером в редакторе).
 func TestCompileTimeoutIsVisible(t *testing.T) {

@@ -265,8 +265,13 @@ func (r *Runner) compile(ctx context.Context, dir string) (prog, stderr string, 
 	prog = filepath.Join(dir, "prog")
 	cmd := exec.Command(r.opts.GoBin, "build", "-gcflags=-e", "-o", prog, ".")
 	cmd.Dir = dir
+	// GOOS/GOARCH пришпилены к хосту: снипетт собирается, чтобы БЕЖАТЬ
+	// здесь же, и кросс-переменные из окружения сервера дали бы бинарь
+	// чужой платформы (exec format error); при дублях в Env побеждает
+	// последняя запись
 	cmd.Env = append(os.Environ(),
-		"GOPROXY=off", "GOSUMDB=off", "GOFLAGS=-mod=mod", "CGO_ENABLED=0")
+		"GOPROXY=off", "GOSUMDB=off", "GOFLAGS=-mod=mod", "CGO_ENABLED=0",
+		"GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH)
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 	// go build — лишь драйвер: настоящую работу делают его дети (compile,
