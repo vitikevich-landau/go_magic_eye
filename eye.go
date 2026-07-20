@@ -24,6 +24,7 @@ package eye
 import (
 	"fmt"
 	"io"
+	"os"
 	"reflect"
 	"strings"
 
@@ -95,17 +96,28 @@ func emit(m *model.Model, cfg config) {
 // машинного вида не касаются. Ошибка маршалинга здесь невозможна по
 // построению (в DTO только строки и числа), но глотать её молча нельзя —
 // уйдёт валидным JSON-объектом с полем error.
+//
+// EYE_JSON_FD=N — отдельный канал для конвертов: машинный вывод уходит в
+// готовый файловый дескриптор N (его открывает родитель — playground даёт
+// pipe через ExtraFiles), а stdout остаётся целиком человеку. Так конверт
+// не смешивается с печатью программы и не гибнет под её потолками. Канал
+// не дался (fd закрыт) — конверт не теряется: падаем в обычный писатель.
 func printJSON(models []*model.Model, cfg config) {
 	b, err := model.ToJSON(models)
 	if err != nil {
-		fmt.Fprintf(cfg.out, "\n{\"eye_json_version\":%d,\"error\":%q}\n", model.JSONVersion, err.Error())
-		return
+		b = []byte(fmt.Sprintf("{\"eye_json_version\":%d,\"error\":%q}", model.JSONVersion, err.Error()))
 	}
 	// конверт начинается с чистой строки: перед Inspect могла быть печать
 	// без завершающего \n (fmt.Print) — потребитель, режущий поток по
 	// строкам, не должен получить склейку «хвост{конверт}»
-	b = append(b, '\n')
-	cfg.out.Write(append([]byte("\n"), b...))
+	payload := append([]byte("\n"), b...)
+	payload = append(payload, '\n')
+	if fd := envInt("EYE_JSON_FD", 0); fd > 0 {
+		if _, werr := os.NewFile(uintptr(fd), "eye-json").Write(payload); werr == nil {
+			return
+		}
+	}
+	cfg.out.Write(payload)
 }
 
 // printLines — вывод с центрированием (EYE_CENTER) по ширине экрана.

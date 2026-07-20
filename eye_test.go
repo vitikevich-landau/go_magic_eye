@@ -2,6 +2,8 @@ package eye_test
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -149,6 +151,32 @@ func TestEnvFormatJSON(t *testing.T) {
 	var b strings.Builder
 	eye.Finspect(&b, 42)
 	jsonEnvelope(t, b.String())
+}
+
+// EYE_JSON_FD уводит конверт в отдельный дескриптор: писателю (stdout
+// программы) не достаётся ничего — машинный канал отделён от человеческого.
+func TestEnvJSONFDRedirect(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	t.Setenv("EYE_FORMAT", "json")
+	t.Setenv("EYE_JSON_FD", fmt.Sprint(w.Fd()))
+
+	var b strings.Builder
+	eye.Finspect(&b, 42, eye.WithLabel("ответ"))
+
+	if b.String() != "" {
+		t.Errorf("конверт просочился в писатель: %.120q", b.String())
+	}
+	buf := make([]byte, 64*1024)
+	n, err := r.Read(buf)
+	if err != nil || n == 0 {
+		t.Fatalf("в канале конвертов пусто: %v", err)
+	}
+	jsonEnvelope(t, strings.TrimSpace(string(buf[:n])))
 }
 
 func TestWithFormatBeatsEnv(t *testing.T) {

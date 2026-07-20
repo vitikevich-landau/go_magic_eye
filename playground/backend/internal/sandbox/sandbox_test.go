@@ -123,6 +123,42 @@ func TestRunKillsInfiniteLoop(t *testing.T) {
 	}
 }
 
+// Потоп в stdout ДО Inspect не топит конверт: у машинного канала свой
+// дескриптор (EYE_JSON_FD) и свой потолок, обрезание шума его не касается.
+func TestEnvelopeSurvivesStdoutFlood(t *testing.T) {
+	r := New(Options{LibDir: libDir(t), MaxOutput: 64 * 1024})
+	code := `package main
+
+import (
+	"fmt"
+	"strings"
+
+	eye "github.com/vitikevich-landau/go_magic_eye"
+)
+
+func main() {
+	for i := 0; i < 64; i++ { // ~1 МиБ шума при потолке 64 КиБ
+		fmt.Println(strings.Repeat("шум ", 4096))
+	}
+	x := 42
+	eye.Inspect(&x, "ответ")
+}
+`
+	res, err := r.Run(context.Background(), code)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("прогон не удался: %+v (stderr: %s)", res.Diags, res.Stderr)
+	}
+	if res.Envelope == nil {
+		t.Fatal("конверт утонул в потопе stdout")
+	}
+	if !strings.Contains(res.Stdout, "обрезан") {
+		t.Errorf("потоп не помечен обрезанным: %.120q", res.Stdout)
+	}
+}
+
 // Кросс-переменные окружения сервера не протекают в сборку: снипетт
 // собирается бежать ЗДЕСЬ, а не на GOOS из чужого экспорта.
 func TestRunPinsHostPlatform(t *testing.T) {

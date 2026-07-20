@@ -30,6 +30,8 @@ import (
 //	EYE_ASCII=1        рамки и стрелки — чистый ASCII
 //	EYE_SNAP_DIR=…     каталог для снимков экрана клавишей s
 //	EYE_FORMAT=json    вместо рамок печатать JSON-модель (машинный вид)
+//	EYE_JSON_FD=N      конверты JSON — в файловый дескриптор N (открывает
+//	                   родитель), stdout остаётся человеку
 //	EYE_SESSION=1      Explore/галерея: сеансовый JSON-протокол по
 //	                   stdin/stdout вместо TUI (см. internal/proto)
 //

@@ -345,9 +345,50 @@ func (r *Runner) execute(prog string) (RunResult, error) {
 	cmd.Stderr = stderrBuf
 	setProcGroup(cmd)
 
+	// отдельный канал для конвертов (EYE_JSON_FD=3): у машинного вывода
+	// свой пайп и СВОЙ потолок — потоп в stdout (печать больше MaxOutput
+	// до Inspect) не топит конверт вместе с шумом. stdout-извлечение ниже
+	// остаётся запасным путём (fd не поддержан платформой/старая библиотека)
+	var envelopeBuf *capBuffer
+	var envelopeDone chan struct{}
+	var envW *os.File
+	if runtime.GOOS != "windows" {
+		envR, w, perr := os.Pipe()
+		if perr != nil {
+			return RunResult{}, perr
+		}
+		envW = w
+		cmd.ExtraFiles = []*os.File{envW} // в ребёнке — fd 3
+		cmd.Env = append(cmd.Env, "EYE_JSON_FD=3")
+		envelopeBuf = newCapBuffer(r.opts.MaxOutput)
+		envelopeDone = make(chan struct{})
+		go func() {
+			defer close(envelopeDone)
+			defer envR.Close()
+			buf := make([]byte, 32*1024)
+			for {
+				n, rerr := envR.Read(buf)
+				if n > 0 {
+					envelopeBuf.Write(buf[:n])
+				}
+				if rerr != nil {
+					return
+				}
+			}
+		}()
+	}
+
 	res := RunResult{}
 	if err := cmd.Start(); err != nil {
+		if envW != nil {
+			envW.Close()
+		}
 		return RunResult{}, err
+	}
+	if envW != nil {
+		// родительский конец закрывается сразу: EOF читателю придёт ровно
+		// со смертью ребёнка (у того свой дубликат дескриптора)
+		envW.Close()
 	}
 	if err := applyMemLimit(cmd.Process.Pid, int64(r.opts.HardMemMiB)<<20); err != nil {
 		killProcGroup(cmd)
@@ -377,8 +418,22 @@ func (r *Runner) execute(prog string) (RunResult, error) {
 	if st := cmd.ProcessState; st != nil {
 		res.ExitCode = st.ExitCode()
 	}
-	env, rest := ExtractEnvelopes(stdout.Bytes())
+	// конверты из своего канала и из stdout (запасной путь) собираются
+	// единым извлечением: поток fd — впереди, остаток обоих — пользователю
+	combined := stdout.Bytes()
+	joined := false
+	if envelopeBuf != nil {
+		<-envelopeDone // дочитать канал конвертов до EOF
+		if eb := envelopeBuf.Bytes(); len(eb) > 0 {
+			combined = append(append(eb, '\n'), combined...)
+			joined = true
+		}
+	}
+	env, rest := ExtractEnvelopes(combined)
 	res.Envelope = env
+	if joined {
+		rest = strings.TrimPrefix(rest, "\n") // ровно наш стыковой перевод строки
+	}
 	res.Stdout = rest
 	if !res.TimedOut {
 		res.Stderr = stderrBuf.String()
