@@ -86,6 +86,33 @@ func TestExtractUserJSONNotStolen(t *testing.T) {
 	}
 }
 
+// Лог-самозванец с версией, но БЕЗ массива models — тоже не конверт:
+// раньше он молча съедался (позиция сдвигалась, моделей ноль), и строка
+// пользователя исчезала из stdout.
+func TestExtractImpostorWithoutModelsNotStolen(t *testing.T) {
+	for _, impostor := range []string{
+		"{\"eye_json_version\":1}\n",
+		"{\"eye_json_version\":1,\"message\":\"лог\"}\n",
+	} {
+		env, rest := ExtractEnvelopes([]byte(impostor))
+		if env != nil {
+			t.Errorf("самозванец %q принят за конверт: %s", impostor, env)
+		}
+		if !strings.Contains(rest, "eye_json_version") {
+			t.Errorf("самозванец %q пропал из stdout: %q", impostor, rest)
+		}
+	}
+	// …а рядом с настоящим конвертом самозванец уходит в остаток,
+	// настоящий — в модели
+	env, rest := ExtractEnvelopes([]byte("{\"eye_json_version\":1,\"message\":\"лог\"}\n" + envA))
+	if n := modelCount(t, env); n != 1 {
+		t.Errorf("настоящий конверт рядом с самозванцем: моделей %d", n)
+	}
+	if !strings.Contains(rest, "\"message\"") {
+		t.Errorf("самозванец пропал: %q", rest)
+	}
+}
+
 // Два Inspect'а подряд без печати между ними — конверты стоят встык
 // (именно так выглядит вывод обычного примера с двумя осмотрами).
 func TestExtractConsecutiveEnvelopes(t *testing.T) {

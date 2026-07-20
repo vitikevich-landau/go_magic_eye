@@ -20,8 +20,8 @@ var envelopeMark = []byte("{\n  \"eye_json_version\"")
 // Пользовательский «{...}» без этого поля конвертом не считается.
 func ExtractEnvelopes(out []byte) (envelope []byte, rest string) {
 	type env struct {
-		Version int               `json:"eye_json_version"`
-		Models  []json.RawMessage `json:"models"`
+		Version int             `json:"eye_json_version"`
+		Models  json.RawMessage `json:"models"`
 	}
 	var models []json.RawMessage
 	var restBuf bytes.Buffer
@@ -46,14 +46,21 @@ func ExtractEnvelopes(out []byte) (envelope []byte, rest string) {
 		}
 		dec := json.NewDecoder(bytes.NewReader(out[cand:]))
 		var e env
-		if err := dec.Decode(&e); err == nil && e.Version == 1 {
+		var ms []json.RawMessage
+		// конверт — только ПОЛНАЯ форма: версия плюс массив models (пустой
+		// законен). Лог-самозванец {"eye_json_version":1} без models — печать
+		// пользователя, съесть её молча нельзя (тот же принцип, что у
+		// isProtocolLine в сеансах: половинных форм контракт не знает)
+		if err := dec.Decode(&e); err == nil && e.Version == 1 &&
+			bytes.HasPrefix(bytes.TrimSpace(e.Models), []byte("[")) &&
+			json.Unmarshal(e.Models, &ms) == nil {
 			// один \n перед конвертом — разделитель самой библиотеки
 			// (конверт начинается с чистой строки), не печать пользователя:
 			// глотаем ровно его, пользовательские переводы строк целы
 			prefix := out[pos:cand]
 			prefix = bytes.TrimSuffix(prefix, []byte("\n"))
 			restBuf.Write(prefix)
-			models = append(models, e.Models...)
+			models = append(models, ms...)
 			pos = cand + int(dec.InputOffset())
 			// съесть перевод строки, оставшийся от печати конверта
 			if pos < len(out) && out[pos] == '\n' {
