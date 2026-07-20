@@ -66,9 +66,12 @@ export const usePlayground = defineStore('playground', {
     // молчит про сетевые беды, чтобы не мигать на каждый чих.
     async check() {
       if (!this.code.trim() || this.running) return
+      const code = this.code
       try {
-        const res = await checkCode(this.code)
-        this.diagnostics = res.diagnostics
+        const res = await checkCode(code)
+        // медленная проверка старого текста не вешает маркеры с чужими
+        // номерами строк на уже отредактированный код
+        if (this.code === code) this.diagnostics = res.diagnostics
       } catch {
         /* фоновая проверка не имеет права шуметь */
       }

@@ -107,9 +107,15 @@ func (r *Runner) StartSession(ctx context.Context, code string) (*Live, RunResul
 		cleanup()
 		return nil, RunResult{}, err
 	}
-	if err := s.awaitHello(); err != nil {
+	if err := s.awaitHello(ctx); err != nil {
 		s.Close()
 		return nil, RunResult{}, err
+	}
+	// клиент мог отменить запрос ровно между hello и регистрацией:
+	// такой сеанс никто не получит и не закроет — не регистрируем
+	if ctx.Err() != nil {
+		s.Close()
+		return nil, RunResult{}, fmt.Errorf("клиент ушёл, не дождавшись странствия: %w", ctx.Err())
 	}
 	r.registerSession(s)
 	return s, RunResult{OK: true, Diags: nil, CompileMS: compileMS}, nil
@@ -235,11 +241,15 @@ func isProtocolLine(line []byte) bool {
 // Оба исхода — «программа вышла без Explore» и «не поздоровалась за
 // HelloWait» — вина снипетта, не песочницы: оба приходят классом
 // ErrNoSession, чтобы API отвечал пользовательской ошибкой, а не 500.
-func (s *Live) awaitHello() error {
+// Отмена ctx (клиент закрыл вкладку, не дождавшись) прекращает ожидание —
+// иначе повторные брошенные старты копили бы сеансы-сироты до жнеца.
+func (s *Live) awaitHello(ctx context.Context) error {
 	wait := s.runner.opts.HelloWait
 	deadline := time.After(wait)
 	for {
 		select {
+		case <-ctx.Done():
+			return fmt.Errorf("клиент ушёл, не дождавшись странствия: %w", ctx.Err())
 		case line, open := <-s.lines:
 			if !open {
 				return ErrNoSession

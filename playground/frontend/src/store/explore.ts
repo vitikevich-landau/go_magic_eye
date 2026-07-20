@@ -113,8 +113,10 @@ export const useExplore = defineStore('explore', {
         return
       }
       if (n.children === null) {
+        const session = this.session
         try {
-          const res = await exploreCmd(this.session, 'kids', id)
+          const res = await exploreCmd(session, 'kids', id)
+          if (this.session !== session) return // сеанс сменился: дети из прошлого дерева
           this.appendStdout(res.stdout)
           if (!res.ok) {
             // честный отказ (лист, nil…) — показываем причину у узла
@@ -124,6 +126,7 @@ export const useExplore = defineStore('explore', {
           }
           n.children = this.ingest(res.nodes ?? [], id)
         } catch (e) {
+          if (this.session !== session) return // беда прошлого сеанса — не наша
           if (e instanceof SessionGoneError) this.dead(e.message)
           else this.error = (e as Error).message
           return
@@ -145,8 +148,9 @@ export const useExplore = defineStore('explore', {
         if (this.selectedId !== id) return // быстрые клики: выбор уже уехал
         this.detail = res.ok && res.eye ? (res.eye.models[0] ?? null) : null
       } catch (e) {
+        if (this.session !== session) return // смерть ПРОШЛОГО сеанса не гасит новый
         if (e instanceof SessionGoneError) this.dead(e.message)
-        else if (this.session === session) this.error = (e as Error).message
+        else this.error = (e as Error).message
       } finally {
         if (this.session === session && this.selectedId === id) this.detailLoading = false
       }

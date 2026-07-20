@@ -310,6 +310,42 @@ func TestCloseDuringInflightCommand(t *testing.T) {
 	}
 }
 
+// Клиент отменил запрос (закрыл вкладку), пока снипетт готовился к
+// странствию: сеанс не регистрируется и не живёт сиротой до жнеца.
+func TestStartSessionClientCancelNotRegistered(t *testing.T) {
+	r := newRunner(t)
+	code := `package main
+
+import (
+	"time"
+
+	eye "github.com/vitikevich-landau/go_magic_eye"
+)
+
+func main() {
+	time.Sleep(5 * time.Second)
+	x := 1
+	eye.Explore(&x)
+}
+`
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(2 * time.Second) // компиляция успела, ожидание hello — нет
+		cancel()
+	}()
+	live, _, err := r.StartSession(ctx, code)
+	if err == nil {
+		live.Close()
+		t.Fatal("сеанс пережил отмену клиента")
+	}
+	r.sessMu.Lock()
+	n := len(r.sessions)
+	r.sessMu.Unlock()
+	if n != 0 {
+		t.Fatalf("после отмены клиента в реестре осталось %d сеансов", n)
+	}
+}
+
 func TestSplitProtocol(t *testing.T) {
 	for name, tc := range map[string]struct {
 		in           string

@@ -91,6 +91,48 @@ describe('гонка отменённого старта', () => {
   })
 })
 
+// Ответы прошлого сеанса не трогают новое дерево и не гасят его.
+describe('ответы из прошлого сеанса', () => {
+  it('поздние kids не вливаются в новое дерево', async () => {
+    const ex = useExplore()
+    ex.session = 's1'
+    ex.ingest([node(1, 'корень')], null)
+
+    let resolveKids!: (v: unknown) => void
+    ;(exploreCmd as Mock).mockReturnValueOnce(new Promise((r) => (resolveKids = r)))
+
+    const pending = ex.toggle(1)
+    // пока kids летели — сеанс перезапустили с другим деревом
+    ex.session = 's2'
+    ex.nodes = new Map()
+    ex.ingest([node(9, 'новый корень')], null)
+
+    resolveKids({ ok: true, nodes: [node(2, 'дитя прошлого')] })
+    await pending
+
+    expect(ex.nodes.has(2)).toBe(false)
+    expect(ex.nodes.get(9)?.label).toBe('новый корень')
+  })
+
+  it('SessionGone прошлого сеанса не убивает новый', async () => {
+    const { SessionGoneError } = await import('../api/client')
+    const ex = useExplore()
+    ex.session = 's1'
+    ex.ingest([node(1, 'корень')], null)
+
+    let rejectDetail!: (e: unknown) => void
+    ;(exploreCmd as Mock).mockReturnValueOnce(new Promise((_, rej) => (rejectDetail = rej)))
+
+    const pending = ex.select(1)
+    ex.session = 's2' // рестарт, пока detail летел
+    rejectDetail(new SessionGoneError('сеанс завершился'))
+    await pending
+
+    expect(ex.session).toBe('s2')
+    expect(ex.error).toBe('')
+  })
+})
+
 // Быстрые клики по дереву: устаревший ответ detail не перекрывает свежий.
 describe('гонка устаревшего detail', () => {
   it('поздний ответ по прошлому узлу игнорируется', async () => {
