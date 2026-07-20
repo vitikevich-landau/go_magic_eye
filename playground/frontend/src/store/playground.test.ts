@@ -7,7 +7,7 @@ vi.mock('../api/client', () => ({
   fetchExamples: vi.fn(),
 }))
 
-import { checkCode } from '../api/client'
+import { checkCode, runCode } from '../api/client'
 import { usePlayground } from './playground'
 
 beforeEach(() => {
@@ -37,6 +37,36 @@ describe('гонка фоновой проверки', () => {
     })
     await oldCheck
 
+    expect(pg.diagnostics).toEqual([])
+  })
+})
+
+// Правка кода во время прогона: ответ старого кода не ложится на новый.
+describe('гонка запуска', () => {
+  it('устаревший результат run игнорируется', async () => {
+    const pg = usePlayground()
+    pg.code = 'старый код'
+
+    let resolveRun!: (v: unknown) => void
+    ;(runCode as Mock).mockReturnValueOnce(new Promise((r) => (resolveRun = r)))
+
+    const running = pg.run()
+    pg.code = 'новый код' // отредактировали, пока прогон летел
+
+    resolveRun({
+      ok: true,
+      diagnostics: [{ line: 7, col: 1, severity: 'error', message: 'из прошлого прогона' }],
+      eye: { eye_json_version: 1, models: [{ label: 'старый' }] },
+      stdout: '',
+      stderr: '',
+      timed_out: false,
+      exit_code: 0,
+      compile_ms: 1,
+      run_ms: 1,
+    })
+    await running
+
+    expect(pg.result).toBeNull() // ответ старого кода не применён
     expect(pg.diagnostics).toEqual([])
   })
 })

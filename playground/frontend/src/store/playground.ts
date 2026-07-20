@@ -85,12 +85,16 @@ export const usePlayground = defineStore('playground', {
       // должен оставить старую карту памяти под баннером ошибки — её легко
       // принять за вывод нового кода
       this.result = null
+      const code = this.code
       try {
-        const res = await runCode(this.code)
+        const res = await runCode(code)
+        // код успели отредактировать, пока прогон летел: ответ старого
+        // кода описывал бы уже не то, что на экране — как в check()
+        if (this.code !== code) return
         this.result = res
         this.diagnostics = res.diagnostics
       } catch (e) {
-        this.apiError = (e as Error).message
+        if (this.code === code) this.apiError = (e as Error).message
       } finally {
         this.running = false
       }
