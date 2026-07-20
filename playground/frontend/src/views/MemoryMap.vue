@@ -38,9 +38,10 @@ const spotlight = computed<Region | null>(() =>
   active.value === null ? null : (props.model.regions[active.value] ?? null),
 )
 
-// анимация little-endian: закреплённое целое поле
+// анимация little-endian: закреплённое целое поле (типу без объекта
+// разворачивать нечего — байтов нет)
 const le = computed(() => {
-  if (pinned.value === null) return null
+  if (pinned.value === null || !props.model.bytes) return null
   const r = props.model.regions[pinned.value]
   if (!r || !isLittleEndianCandidate(r)) return null
   return { region: r, ...leSteps(props.model, r) }

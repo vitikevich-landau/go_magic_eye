@@ -65,6 +65,17 @@ describe('buildCells', () => {
   })
 })
 
+describe('тип без объекта (InspectType/AddType)', () => {
+  it('раскладка строится по размеру паспорта с заглушками вместо байт', () => {
+    const typeOnly: EyeModel = { ...model, has_value: false, addr: '', bytes: '' }
+    const cells = buildCells(typeOnly)
+    expect(cells).toHaveLength(16) // passport.size
+    expect(cells[0].hex).toBe('··')
+    expect(cells[0].regionIndex).toBe(0) // регионы на месте
+    expect(cells[5].regionIndex).toBe(2) // дыра видна и без байт
+  })
+})
+
 describe('regionAt', () => {
   it('накрывает границы включительно-исключительно', () => {
     expect(regionAt(regions, 3)).toBe(0)

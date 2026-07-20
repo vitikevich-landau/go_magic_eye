@@ -263,20 +263,37 @@ func (r *Runner) compile(ctx context.Context, dir string) (prog, stderr string, 
 	cctx, cancel := context.WithTimeout(ctx, r.opts.CompileTimeout)
 	defer cancel()
 	prog = filepath.Join(dir, "prog")
-	cmd := exec.CommandContext(cctx, r.opts.GoBin, "build", "-gcflags=-e", "-o", prog, ".")
+	cmd := exec.Command(r.opts.GoBin, "build", "-gcflags=-e", "-o", prog, ".")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
 		"GOPROXY=off", "GOSUMDB=off", "GOFLAGS=-mod=mod", "CGO_ENABLED=0")
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
-	if err := cmd.Run(); err != nil {
-		if cctx.Err() != nil {
-			// причина уходит и в stderr: у таймаута нет вывода компилятора,
-			// а пустой отказ (ok:false без единого слова) хуже честного
-			msg := fmt.Sprintf("компиляция не уложилась в %s", r.opts.CompileTimeout)
-			return "", msg, fmt.Errorf("%s", msg)
+	// go build — лишь драйвер: настоящую работу делают его дети (compile,
+	// link). CommandContext убил бы только драйвера, и на таймауте дети
+	// доедали бы CPU уже без присмотра — поэтому своя группа процессов и
+	// убийство всей группы, как у запуска снипетта
+	setProcGroup(cmd)
+	if err := cmd.Start(); err != nil {
+		return "", "", err
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case werr := <-done:
+		if werr != nil {
+			return "", errBuf.String(), werr
 		}
-		return "", errBuf.String(), err
+	case <-cctx.Done():
+		killProcGroup(cmd)
+		<-done
+		// причина уходит и в stderr: у таймаута нет вывода компилятора,
+		// а пустой отказ (ok:false без единого слова) хуже честного
+		msg := fmt.Sprintf("компиляция не уложилась в %s", r.opts.CompileTimeout)
+		if ctx.Err() != nil {
+			msg = "сборка прервана: запрос отменён клиентом"
+		}
+		return "", msg, fmt.Errorf("%s", msg)
 	}
 	return prog, "", nil
 }

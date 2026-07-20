@@ -47,8 +47,9 @@ function onLitRange(r: { offset: number; size: number } | null) {
         @lit="onLitRange"
       />
 
+      <!-- у типа без объекта байтов нет, но раскладка полей и дыр — есть -->
       <MemoryMap
-        v-if="model.bytes"
+        v-if="model.bytes || model.regions.length"
         :model="model"
         :lit-region="litRegion"
         :lit-range="litRange"

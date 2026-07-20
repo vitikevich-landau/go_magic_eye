@@ -38,16 +38,23 @@ export function regionAt(regions: Region[], offset: number): number {
 }
 
 // buildCells — все байты объекта как ячейки сетки 8 колонок.
+// Тип без объекта (InspectType/AddType): байтов нет, но раскладка полей и
+// дыр есть — ячейки строятся по размеру из паспорта с заглушкой «··»
+// вместо значений.
 export function buildCells(model: EyeModel): ByteCell[] {
   const bytes = hexToBytes(model.bytes)
-  return bytes.map((b, offset) => ({
-    offset,
-    row: Math.floor(offset / 8),
-    col: offset % 8,
-    hex: b.toString(16).padStart(2, '0'),
-    ascii: toAscii(b),
-    regionIndex: regionAt(model.regions, offset),
-  }))
+  const n = bytes.length || model.passport.size
+  return Array.from({ length: n }, (_, offset) => {
+    const b = bytes[offset]
+    return {
+      offset,
+      row: Math.floor(offset / 8),
+      col: offset % 8,
+      hex: b === undefined ? '··' : b.toString(16).padStart(2, '0'),
+      ascii: b === undefined ? '·' : toAscii(b),
+      regionIndex: regionAt(model.regions, offset),
+    }
+  })
 }
 
 export function rowCount(model: EyeModel): number {
